@@ -134,6 +134,20 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    private void OpenLocalFolder()
+    {
+        if (string.IsNullOrEmpty(RepositoryPath)) return;
+        try
+        {
+             Process.Start(new ProcessStartInfo(RepositoryPath) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("フォルダを開けませんでした: " + ex.Message);
+        }
+    }
+
     /// @brief 選択された変更ファイル
     [ObservableProperty]
     private FileChangeEntry? _selectedChange;
