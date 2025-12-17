@@ -21,23 +21,10 @@ public partial class MainWindow : Window
         var runner = new ProcessRunner();
         var gitService = new GitService(runner);
         
-        // Find git root automatically from current dir if possible, or simple default
-        // The plan says "Start from current dir", assuming user launches app from repo or selects it.
-        // For now, let's use Environment.CurrentDirectory
-        var root = GitService.FindGitRoot(Environment.CurrentDirectory);
-        if (root != null)
-        {
-             gitService.SetRepository(root);
-        }
-        else
-        {
-             // If not found, one might want to prompt folder selection. 
-             // For build-check MVP, we leave it empty or user sets it via logic (not implemented yet).
-             // StateService will return flags indicating issues.
-        }
+        // 起動時は選択画面を表示（自動でリポジトリを開かない）
+        // ユーザーがリポジトリを選択するか、最近使ったリポジトリから選ぶ
 
         var gitHubService = new GitHubService(runner);
-        if (root != null) gitHubService.SetRepository(root);
 
         var stateService = new StateService(gitService, gitHubService);
         var toolDetector = new ToolDetector();

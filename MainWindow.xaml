@@ -231,6 +231,58 @@
                 </ListBox.ItemTemplate>
             </ListBox>
         </Expander>
+
+        <!-- Startup / Repo Selection Overlay -->
+        <Grid Grid.RowSpan="3" Visibility="{Binding IsNotRepositoryValid, Converter={StaticResource BoolToVis}}" Background="#F0F0F0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="300"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Main Menu -->
+            <StackPanel Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="Simple PR Client" FontSize="32" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,30"/>
+                
+                <Button Command="{Binding OpenRepositoryFlowCommand}" Width="250" Height="50" Margin="0,0,0,15">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="📂" FontSize="20" Margin="0,0,10,0"/>
+                        <TextBlock Text="Open Folder" FontSize="16" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+
+                <Button Command="{Binding CloneRepositoryFlowCommand}" Width="250" Height="50" Margin="0,0,0,15">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="📥" FontSize="20" Margin="0,0,10,0"/>
+                        <TextBlock Text="Clone Repository" FontSize="16" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
+            <!-- Recent History -->
+            <Border Grid.Column="1" Background="White" Margin="0,20,20,20" Padding="10" CornerRadius="5">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="10" ShadowDepth="2" Direction="270" Color="#CCC" Opacity="0.5"/>
+                </Border.Effect>
+                <DockPanel>
+                    <TextBlock Text="Recent Repositories" FontWeight="Bold" DockPanel.Dock="Top" Margin="0,0,0,10"/>
+                    <ListBox ItemsSource="{Binding RecentRepositories}">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Padding" Value="5"/>
+                                <Setter Property="Cursor" Value="Hand"/>
+                                <EventSetter Event="MouseDoubleClick" Handler="RecentRepo_MouseDoubleClick"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" ToolTip="{Binding}"/>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+        </Grid>
         
         <!-- Busy Overlay -->
         <Grid Grid.RowSpan="3" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" Background="#80FFFFFF">
