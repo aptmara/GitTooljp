@@ -31,8 +31,8 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="Repo: " FontWeight="Bold"/>
                     <TextBlock Text="{Binding RepositoryPath}" Margin="0,0,15,0"/>
-                    <TextBlock Text="Branch: " FontWeight="Bold"/>
-                    <TextBlock Text="{Binding CurrentBranch}" Margin="0,0,15,0"/>
+                    <TextBlock Text="Branch: " FontWeight="Bold" VerticalAlignment="Center"/>
+                    <ComboBox ItemsSource="{Binding Branches}" SelectedItem="{Binding SelectedBranch}" Margin="5,0,15,0" Width="200"/>
                     <TextBlock Text="{Binding StatusMessage}" Foreground="#007ACC" FontWeight="SemiBold"/>
                 </StackPanel>
                 <Button Grid.Column="1" Content="再読み込み" Command="{Binding RefreshCommand}" Padding="10,2"/>
@@ -164,7 +164,9 @@
                      </TextBlock>
                  </StackPanel>
             </Expander.Header>
-            <ListBox ItemsSource="{Binding Logs}" Height="150" SelectionMode="Extended" FontFamily="Consolas">
+            <ListBox Name="LogListBox" ItemsSource="{Binding Logs}" Height="150" SelectionMode="Extended" FontFamily="Consolas"
+                     PreviewMouseLeftButtonUp="LogListBox_PreviewMouseLeftButtonUp"
+                     KeyDown="LogListBox_KeyDown">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <TextBlock Text="{Binding}" 

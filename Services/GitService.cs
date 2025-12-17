@@ -200,4 +200,29 @@ public class GitService
         // Basic escaping for Windows command line
         return arg.Replace("\"", "\\\"");
     }
+
+    /// @brief ローカルブランチ一覧を取得する
+    public async Task<List<string>> GetLocalBranchesAsync(CancellationToken ct = default)
+    {
+        // git branch --format="%(refname:short)"
+        var result = await _runner.RunAsync("git", "branch --format=\"%(refname:short)\"", _repoPath, ct);
+        if (!result.Success) return new List<string>();
+        
+        return result.StandardOutput
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .ToList();
+    }
+
+    /// @brief ブランチをチェックアウトする
+    public async Task<ProcessResult> CheckoutAsync(string branchName, CancellationToken ct = default)
+    {
+        return await _runner.RunAsync("git", $"checkout \"{EscapeArg(branchName)}\"", _repoPath, ct);
+    }
+
+    /// @brief ブランチを新規作成してチェックアウトする (-b)
+    public async Task<ProcessResult> CreateBranchAsync(string branchName, CancellationToken ct = default)
+    {
+        return await _runner.RunAsync("git", $"checkout -b \"{EscapeArg(branchName)}\"", _repoPath, ct);
+    }
 }
