@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:SimplePRClient"
         xmlns:vm="clr-namespace:SimplePRClient.ViewModels"
+        xmlns:helpers="clr-namespace:SimplePRClient.Helpers"
         mc:Ignorable="d"
         Title="Simple PR Client" Height="700" Width="1000"
         WindowStartupLocation="CenterScreen">
@@ -24,18 +25,63 @@
         <!-- Header -->
         <Border Grid.Row="0" Background="#F0F0F0" Padding="10">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="Repo: " FontWeight="Bold"/>
-                    <TextBlock Text="{Binding RepositoryPath}" Margin="0,0,15,0"/>
-                    <TextBlock Text="Branch: " FontWeight="Bold" VerticalAlignment="Center"/>
-                    <ComboBox ItemsSource="{Binding Branches}" SelectedItem="{Binding SelectedBranch}" Margin="5,0,15,0" Width="200"/>
-                    <TextBlock Text="{Binding StatusMessage}" Foreground="#007ACC" FontWeight="SemiBold"/>
+
+                <!-- Top Row: Repo & Link -->
+                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,5">
+                    <TextBlock Text="Repo: " FontWeight="Bold" VerticalAlignment="Center"/>
+                    
+                    <TextBlock VerticalAlignment="Center" Margin="0,0,10,0" TextTrimming="CharacterEllipsis" MaxWidth="600">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="{Binding RepositoryPath}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasRemoteUrl}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                        
+                    <TextBlock VerticalAlignment="Center" Margin="0,0,10,0" TextTrimming="CharacterEllipsis" MaxWidth="600">
+                         <Hyperlink Command="{Binding OpenRemoteCommand}" Foreground="Blue" TextDecorations="Underline">
+                             <Run Text="{Binding RepositoryPath}"/>
+                         </Hyperlink>
+                         <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasRemoteUrl}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <Button Content="Change" Command="{Binding CloseRepositoryCommand}" Padding="5,0" Height="22"/>
                 </StackPanel>
-                <Button Grid.Column="1" Content="再読み込み" Command="{Binding RefreshCommand}" Padding="10,2"/>
+                
+                <!-- Bottom Row: Branch & Status -->
+                <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Branch: " FontWeight="Bold" VerticalAlignment="Center"/>
+                    <ComboBox ItemsSource="{Binding Branches}" SelectedItem="{Binding SelectedBranch}" Margin="5,0,5,0" Width="200" VerticalAlignment="Center"/>
+                    <Button Content="🗑" Command="{Binding DeleteBranchFlowCommand}" ToolTip="ブランチ削除" Padding="5,0" Margin="0,0,15,0" VerticalAlignment="Center"/>
+                    
+                    <TextBlock Text="{Binding StatusMessage}" Foreground="#007ACC" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                </StackPanel>
+                
+                <!-- Right Side Buttons -->
+                <StackPanel Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" VerticalAlignment="Top" HorizontalAlignment="Right">
+                     <Button Content="再読み込み" Command="{Binding RefreshCommand}" Padding="10,5" Height="30"/>
+                </StackPanel>
             </Grid>
         </Border>
 
@@ -56,8 +102,8 @@
                         <ColumnDefinition Width="5"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <Button Grid.Column="0" Content="全選択 (Check All)" Command="{Binding StageAllCommand}"/>
-                    <Button Grid.Column="2" Content="全解除 (Uncheck All)" Command="{Binding UnstageAllCommand}"/>
+                    <Button Grid.Column="0" Content="全選択" Command="{Binding StageAllCommand}"/>
+                    <Button Grid.Column="2" Content="全解除" Command="{Binding UnstageAllCommand}"/>
                 </Grid>
 
                 <ListView ItemsSource="{Binding Changes}" SelectedItem="{Binding SelectedChange}">
@@ -84,10 +130,19 @@
 
             <!-- 2. Diff Panel -->
             <DockPanel Grid.Column="1" Margin="5,0">
-                <TextBlock Text="Diff" FontWeight="Bold" DockPanel.Dock="Top" Margin="0,0,0,5"/>
-                <TextBox Text="{Binding DiffText, Mode=OneWay}" IsReadOnly="True" 
-                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                         FontFamily="Consolas"/>
+                <Grid DockPanel.Dock="Top" Margin="0,0,0,5">
+                    <TextBlock Text="Diff" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <Button Content="{Binding ReadmeButtonText}" Command="{Binding ToggleReadmeCommand}" 
+                            HorizontalAlignment="Right" Padding="10,2"/>
+                </Grid>
+                <Grid>
+                    <TextBox Text="{Binding DiffText, Mode=OneWay}" IsReadOnly="True" 
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                             FontFamily="Consolas"/>
+                     <!-- README Viewer Overlay -->
+                    <WebBrowser Visibility="{Binding IsReadmeVisible, Converter={StaticResource BoolToVis}}"
+                                helpers:BrowserBehavior.Html="{Binding ReadmeHtml}"/>
+                </Grid>
             </DockPanel>
 
             <GridSplitter Grid.Column="1" Width="5"/>

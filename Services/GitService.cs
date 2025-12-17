@@ -232,4 +232,11 @@ public class GitService
         var res = await _runner.RunAsync("git", "log -1 --pretty=%B", _repoPath, ct);
         return res.Success ? res.StandardOutput.Trim() : string.Empty;
     }
+
+    /// @brief 指定したリモートのURLを取得する
+    public async Task<string> GetRemoteUrlAsync(string remote = "origin", CancellationToken ct = default)
+    {
+        var res = await _runner.RunAsync("git", $"remote get-url {remote}", _repoPath, ct);
+        return res.Success ? res.StandardOutput.Trim() : string.Empty;
+    }
 }

@@ -89,6 +89,39 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string _diffText = string.Empty;
 
+    /// @brief リモートURL
+    [ObservableProperty]
+    private string _remoteUrl = string.Empty;
+
+    /// @brief リモートURLがあるかどうか
+    public bool HasRemoteUrl => !string.IsNullOrEmpty(RemoteUrl);
+
+    [RelayCommand]
+    private void OpenRemote()
+    {
+        if (string.IsNullOrEmpty(RemoteUrl)) return;
+        try
+        {
+            var url = RemoteUrl.Trim();
+            // Convert SSH to HTTPS if needed for browser opening
+            // git@github.com:user/repo.git -> https://github.com/user/repo
+            if (url.StartsWith("git@"))
+            {
+                url = url.Replace(":", "/").Replace("git@", "https://");
+            }
+            if (url.EndsWith(".git"))
+            {
+                url = url.Substring(0, url.Length - 4);
+            }
+
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("ブラウザを開けませんでした: " + ex.Message);
+        }
+    }
+
     /// @brief 選択された変更ファイル
     [ObservableProperty]
     private FileChangeEntry? _selectedChange;
@@ -336,11 +369,15 @@ public partial class MainViewModel : ObservableObject
             var currentState = await _stateService.GetCurrentStateAsync();
             var changes = status.Changes;
             var branches = await _gitService.GetLocalBranchesAsync();
+            var remoteUrl = await _gitService.GetRemoteUrlAsync("origin");
             
             // UI Update
             Application.Current.Dispatcher.Invoke(() =>
             {
                 RepositoryPath = repoPath;
+                RemoteUrl = remoteUrl;
+                OnPropertyChanged(nameof(HasRemoteUrl)); // Notify manually or use attribute
+
                 CurrentBranch = status.Branch;
                 CurrentState = currentState;
                 
