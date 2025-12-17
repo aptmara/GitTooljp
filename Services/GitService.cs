@@ -225,4 +225,11 @@ public class GitService
     {
         return await _runner.RunAsync("git", $"checkout -b \"{EscapeArg(branchName)}\"", _repoPath, ct);
     }
+
+    /// @brief 直近のコミットメッセージを取得
+    public async Task<string> GetLastCommitMessageAsync(CancellationToken ct = default)
+    {
+        var res = await _runner.RunAsync("git", "log -1 --pretty=%B", _repoPath, ct);
+        return res.Success ? res.StandardOutput.Trim() : string.Empty;
+    }
 }

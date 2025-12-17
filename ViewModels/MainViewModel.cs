@@ -13,6 +13,8 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 
+using System.Diagnostics;
+
 /// @brief メイン画面のViewModel
 /// 作成者: 山内陽
 public partial class MainViewModel : ObservableObject
@@ -274,7 +276,51 @@ public partial class MainViewModel : ObservableObject
     private Task RefreshAsync() => RefreshInternalAsync(true);
 
     /// @brief 初期化 (サイレント読み込み)
-    public Task InitializeAsync() => RefreshInternalAsync(false);
+    public async Task InitializeAsync()
+    {
+         // 1. Dependency Check
+         await CheckDependenciesAsync();
+         
+         // 2. Load
+         await RefreshInternalAsync(false);
+    }
+    
+    private async Task CheckDependenciesAsync()
+    {
+        // Simple check: run --version
+        // If git missing, Critical error.
+        // If gh missing, Warning (PR feature disabled).
+        
+        // This relies on basic Process usage or we can add "GetVersion" to services.
+        // For MVP, simplistic check.
+        try
+        {
+            // Check Git
+            using var gitProc = new Process();
+            gitProc.StartInfo = new ProcessStartInfo("git", "--version") { UseShellExecute = false, CreateNoWindow = true };
+            gitProc.Start();
+            await gitProc.WaitForExitAsync();
+            if (gitProc.ExitCode != 0) 
+            {
+                MessageBox.Show("Git が正しくインストールされていないか、PATHに通っていません。\nGitをインストールしてください。", "致命的エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            // Check gh
+            using var ghProc = new Process();
+            ghProc.StartInfo = new ProcessStartInfo("gh", "--version") { UseShellExecute = false, CreateNoWindow = true };
+            ghProc.Start();
+            await ghProc.WaitForExitAsync();
+             if (ghProc.ExitCode != 0) 
+            {
+                // Just log header? Or flag?
+                // StateService handles AuthNg, but that assumes gh exists.
+                // We assume gh exists for now based on user context.
+            }
+        }
+        catch
+        {
+             // Ignore for now or handle gracefully
+        }
+    }
 
     private async Task RefreshInternalAsync(bool showBusy)
     {
@@ -629,28 +675,42 @@ public partial class MainViewModel : ObservableObject
         }
 
         // 3. Create PR
-        // Simplified for MVP: ask for title/body in a prompt or use side panel inputs
-        // Assuming we use CommitMessage/Body fields or new fields? Plan says "Action Panel" inputs.
-        // Let's assume we have separate properties PRTitle, PRBody.
-        // For now, using CommitMessage as fallback or input dialog?
-        // Let's use simple InputBox logic or assuming UI has fields.
-        
         IsBusy = true;
         try
         {
-            // For MVP, just using a placeholder or assuming UI bindings exist.
-            // Let's assume we use the Commit Message box for PR details for simplicity if in "Clean" state?
-            // No, that's confusing.
-            // I'll proceed with a simple fixed title or "Last commit message" for now to satisfy build.
-            // Real app needs a dialog.
+            // Fetch default title/body from last commit
+            var lastCommitMsg = await _gitService.GetLastCommitMessageAsync();
+            var lines = lastCommitMsg.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var defaultTitle = lines.FirstOrDefault() ?? CurrentBranch; // Fallback to branch name
+            var defaultBody = lines.Length > 1 ? string.Join(Environment.NewLine, lines.Skip(1)) : "Created by Simple PR Client";
+
+            // Show Dialog (UI Thread)
+            bool? dialogResult = false;
+            string prTitle = defaultTitle;
+            string prBody = defaultBody;
             
-            var title = "Pull Request from " + CurrentBranch;
-            var body = "Created by Simple PR Client";
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                var prWindow = new PRInputWindow(defaultTitle, defaultBody);
+                prWindow.Owner = Application.Current.MainWindow; // Set owner for center
+                dialogResult = prWindow.ShowDialog();
+                if (dialogResult == true)
+                {
+                    prTitle = prWindow.PRTitle;
+                    prBody = prWindow.PRBody;
+                }
+            });
+
+            if (dialogResult != true)
+            {
+                IsBusy = false;
+                return; // User cancelled
+            }
             
             var baseBranch = await _gitHubService.GetDefaultBranchAsync();
             
             Log("PR を作成しています...", false);
-            var result = await _gitHubService.CreatePullRequestAsync(title, body, baseBranch, CurrentBranch);
+            var result = await _gitHubService.CreatePullRequestAsync(prTitle, prBody, baseBranch, CurrentBranch);
             
             if (result.Success)
             {
@@ -667,7 +727,47 @@ public partial class MainViewModel : ObservableObject
             }
             else
             {
-                Log("PR 作成失敗:\n" + result.StandardError, true);
+                var error = result.StandardError;
+                Log("PR 作成失敗:\n" + error, true);
+                
+                // Auth/Scope Error Check
+                if (error.Contains("GraphQL: Resource not accessible by personal access token") || 
+                    error.Contains("scope"))
+                {
+                    var res = MessageBox.Show(
+                        "GitHubの権限不足によりPRを作成できませんでした。\n" +
+                        "これは `repo` スコープが不足している場合に発生します。\n\n" +
+                        "今すぐ認証を更新(Refresh)しますか？\n" +
+                        "([はい]を押すと黒い画面が開きます)\n\n" +
+                        "【操作手順】\n" +
+                        "1. 黒い画面で英語の質問が出ます\n" +
+                        "   'Authenticate Git with your GitHub credentials? (Y/n)'\n" +
+                        "2. キーボードで「Y」と入力し、Enterキーを押してください\n" +
+                        "3. ブラウザが開くので、認証(Authorize)ボタンを押してください",
+                        "権限エラーと修正", 
+                        MessageBoxButton.YesNo, 
+                        MessageBoxImage.Information); // Changed to Information as it's a guide
+                        
+                    if (res == MessageBoxResult.Yes)
+                    {
+                        IsBusy = true;
+                        try 
+                        {
+                            Log("認証更新を実行中 (黒い画面に従ってください)...", false);
+                            var authRes = await _gitHubService.RefreshAuthAsync();
+                            if (authRes.Success)
+                            {
+                                MessageBox.Show("認証更新が完了しました。\n再度 PR 作成を試してください。", "成功");
+                            }
+                            else
+                            {
+                                Log("認証更新失敗 (画面が閉じられたかエラー): " + authRes.ExitCode, true);
+                                // Don't show confusing output if user just closed window
+                            }
+                        }
+                        finally { IsBusy = false; }
+                    }
+                }
             }
         }
         catch (Exception ex)

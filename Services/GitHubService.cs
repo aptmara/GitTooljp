@@ -27,7 +27,7 @@ public class GitHubService
     /// @return 認証済みであれば true
     public async Task<bool> IsAuthenticatedAsync(CancellationToken ct = default)
     {
-        var result = await _runner.RunAsync("gh", "auth status", _repoPath, ct);
+        var result = await RunGhAsync("auth status", ct);
         return result.Success;
     }
 
@@ -46,7 +46,7 @@ public class GitHubService
         CancellationToken ct = default)
     {
         var args = $"pr create --base \"{baseBranch}\" --head \"{headBranch}\" --title \"{EscapeArg(title)}\" --body \"{EscapeArg(body)}\"";
-        return await _runner.RunAsync("gh", args, _repoPath, ct);
+        return await RunGhAsync(args, ct);
     }
 
     /// @brief gh auth login を起動 (インタラクティブ)
@@ -55,7 +55,14 @@ public class GitHubService
     public async Task<ProcessResult> RunAuthLoginAsync(CancellationToken ct = default)
     {
         // ブラウザ認証を開始
-        return await _runner.RunAsync("gh", "auth login --web", _repoPath, ct);
+        return await RunGhAsync("auth login --web", ct, interactive: true);
+    }
+
+    /// @brief gh auth refresh -s repo を実行 (権限更新)
+    public async Task<ProcessResult> RefreshAuthAsync(CancellationToken ct = default)
+    {
+        // また、対話プロンプトが出る可能性があるため、interactive: true (ウィンドウ表示) で実行する。
+        return await RunGhAsync("auth refresh -h github.com -s repo", ct, interactive: true);
     }
 
     /// @brief デフォルトブランチを取得
@@ -63,12 +70,25 @@ public class GitHubService
     /// @return デフォルトブランチ名
     public async Task<string> GetDefaultBranchAsync(CancellationToken ct = default)
     {
-        var result = await _runner.RunAsync("gh", "repo view --json defaultBranchRef --jq .defaultBranchRef.name", _repoPath, ct);
+        var result = await RunGhAsync("repo view --json defaultBranchRef --jq .defaultBranchRef.name", ct);
         return result.Success ? result.StandardOutput.Trim() : "main";
     }
 
     private static string EscapeArg(string arg)
     {
         return arg.Replace("\"", "\\\"");
+    }
+
+    /// @brief ghコマンド共通実行ヘルパー (GITHUB_TOKEN対策)
+    private Task<ProcessResult> RunGhAsync(string args, CancellationToken ct, bool interactive = false)
+    {
+        return _runner.RunAsync("gh", args, _repoPath, ct, env => 
+        {
+            // GITHUB_TOKEN が環境変数にあると、gh は内部の認証ストア(refreshされたもの)ではなく
+            // その環境変数を優先して使用してしまう。
+            // ユーザー環境に古い TOKEN が残っているケース対策として、
+            // アプリからの実行時は常に環境変数を無視(削除)させる。
+            env.Remove("GITHUB_TOKEN");
+        }, interactive);
     }
 }

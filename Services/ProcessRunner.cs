@@ -23,37 +23,59 @@ public class ProcessRunner
     /// @param workingDirectory 作業ディレクトリ
     /// @param ct キャンセルトークン
     /// @return 実行結果
-    public async Task<ProcessResult> RunAsync(string fileName, string arguments, string workingDirectory = "", CancellationToken ct = default)
+    /// @brief コマンドを非同期で実行する
+    /// @param fileName 実行ファイル名 (git, gh 等)
+    /// @param arguments 引数
+    /// @param workingDirectory 作業ディレクトリ
+    /// @param ct キャンセルトークン
+    /// @param configureEnvironment 環境変数を設定するアクション
+    /// @return 実行結果
+    /// @brief コマンドを非同期で実行する
+    /// @param fileName 実行ファイル名 (git, gh 等)
+    /// @param arguments 引数
+    /// @param workingDirectory 作業ディレクトリ
+    /// @param ct キャンセルトークン
+    /// @param configureEnvironment 環境変数を設定するアクション
+    /// @param interactive インタラクティブモード (ウィンドウ表示、リダイレクトなし)
+    /// @return 実行結果
+    public async Task<ProcessResult> RunAsync(string fileName, string arguments, string workingDirectory = "", CancellationToken ct = default, Action<System.Collections.Specialized.StringDictionary>? configureEnvironment = null, bool interactive = false)
     {
         var psi = new ProcessStartInfo
         {
             FileName = fileName,
             Arguments = arguments,
             WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardOutput = !interactive,
+            RedirectStandardError = !interactive,
             UseShellExecute = false,
-            CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8, // git/gh は通常 UTF8
-            StandardErrorEncoding = Encoding.UTF8
+            CreateNoWindow = !interactive,
+            StandardOutputEncoding = interactive ? null : Encoding.UTF8,
+            StandardErrorEncoding = interactive ? null : Encoding.UTF8
         };
 
-        // 環境変数の調整が必要ならここで行う (例: LANG=en_US.UTF-8)
-        psi.EnvironmentVariables["LANG"] = "en_US.UTF-8"; // 英語出力を強制する場合
+        // 環境変数の調整
+        if (!interactive) psi.EnvironmentVariables["LANG"] = "en_US.UTF-8"; // 英語出力を強制する場合
+        configureEnvironment?.Invoke(psi.EnvironmentVariables);
 
         using var process = new Process { StartInfo = psi };
         
         var stdoutBuilder = new StringBuilder();
         var stderrBuilder = new StringBuilder();
 
-        process.OutputDataReceived += (s, e) => { if (e.Data != null) stdoutBuilder.AppendLine(e.Data); };
-        process.ErrorDataReceived += (s, e) => { if (e.Data != null) stderrBuilder.AppendLine(e.Data); };
+        if (!interactive)
+        {
+            process.OutputDataReceived += (s, e) => { if (e.Data != null) stdoutBuilder.AppendLine(e.Data); };
+            process.ErrorDataReceived += (s, e) => { if (e.Data != null) stderrBuilder.AppendLine(e.Data); };
+        }
 
         try
         {
             process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
+            if (!interactive)
+            {
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+            }
 
             await process.WaitForExitAsync(ct);
 
