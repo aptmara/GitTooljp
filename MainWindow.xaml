@@ -162,6 +162,25 @@
             </ScrollViewer>
         </Grid>
 
+        <!-- Output Log -->
+        <Expander Grid.Row="2" Header="Logs" IsExpanded="{Binding IsLogExpanded}" ExpandDirection="Up" MaxHeight="200"
+                  BorderBrush="#CCC" BorderThickness="0,1,0,0" Background="#F8F8F8">
+            <Grid>
+                 <Grid.ColumnDefinitions>
+                     <ColumnDefinition Width="*"/>
+                     <ColumnDefinition Width="Auto"/>
+                 </Grid.ColumnDefinitions>
+                <ListBox ItemsSource="{Binding Logs}" Height="150" Grid.Column="0">
+                     <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" Foreground="{Binding IsError, Converter={StaticResource BoolToColorConverter}}"/>
+                        </DataTemplate>
+                     </ListBox.ItemTemplate>
+                </ListBox>
+                <Button Grid.Column="1" Content="Copy" Command="{Binding CopyLogCommand}" VerticalAlignment="Top" Margin="5"/>
+            </Grid>
+        </Expander>
+
         <!-- Startup / Repo Selection Overlay -->
         <Grid Grid.RowSpan="3" Visibility="{Binding IsNotRepositoryValid, Converter={StaticResource BoolToVis}}" Background="#F0F0F0">
             <Grid.ColumnDefinitions>

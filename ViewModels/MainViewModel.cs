@@ -1097,11 +1097,16 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    // Log Expansion
+    [ObservableProperty]
+    private bool _isLogExpanded;
+
     private void Log(string message, bool isError)
     {
         Application.Current.Dispatcher.Invoke(() =>
         {
             Logs.Add(new LogEntry { Message = message, IsError = isError });
+            if (isError) IsLogExpanded = true;
              // Scroll to bottom logic usually in View code-behind
         });
     }
