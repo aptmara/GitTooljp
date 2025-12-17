@@ -1,0 +1,241 @@
+---
+
+# GitHub連携型 Gitクライアント 企画書（詳細版）
+
+## 1. 企画概要
+
+### 1.1 プロジェクト名（仮）
+
+**Simple PR Client**
+
+### 1.2 目的
+
+Git/GitHub を使った開発において、
+
+* GUIツールは高機能すぎて分かりにくい
+* CLIは失敗時の心理的ハードルが高い
+* Pull Request 作成までの手順が煩雑
+
+という課題を解消し、
+**「commit → push → Pull Request 作成」までを安全かつ迷わず行えるクライアント**を提供する。
+
+---
+
+## 2. 想定ユーザー
+
+### 2.1 主対象
+
+* 日本人高校生（情報系・ゲーム制作・競技プログラミング・部活開発）
+* Git/GitHubの基礎は学び始めている
+* commit / push / Pull Request という言葉は知っているが、
+  rebase や conflict には不安がある
+
+### 2.2 前提スキル
+
+* Windows 操作ができる
+* GitHub アカウントを持っている
+* Visual Studio 2022（または 2026）を使用している可能性が高い
+
+---
+
+## 3. 解決したい課題（Problem）
+
+1. **何が起きているか分からない**
+
+   * 今は commit すべきなのか、push すべきなのか判断できない
+2. **失敗が怖い**
+
+   * pull で conflict が出るとパニックになる
+3. **PR作成が面倒**
+
+   * ブラウザでの操作とローカル作業が分断されている
+4. **用語の混乱**
+
+   * 日本語化されすぎたUIは逆に学習の妨げになる
+
+---
+
+## 4. プロダクト方針（コンセプト）
+
+### 4.1 コアコンセプト
+
+> **Gitを隠さないが、事故らせない**
+
+### 4.2 明確な割り切り
+
+* ❌ レビュー機能は実装しない
+* ❌ マージ機能は実装しない
+* ❌ 独自の conflict 解決UIは作らない
+* ⭕ GitHub公式ツール（gh）と Visual Studio に委譲する
+
+---
+
+## 5. 機能要件（What）
+
+### 5.1 提供する機能（MVP）
+
+1. repository の検出・選択
+2. 変更状態の表示（staged / unstaged / untracked）
+3. commit 作成
+4. push（upstream自動設定対応）
+5. pull（`git pull --rebase` 固定）
+6. Pull Request 作成（GitHub）
+7. conflict 発生時の復旧支援（VS連携）
+
+### 5.2 提供しない機能
+
+* ブランチ作成・削除の高度操作
+* cherry-pick / revert
+* PRレビュー、マージ
+* CI / Issue 管理
+
+---
+
+## 6. 非機能要件（Quality）
+
+### 6.1 信頼性
+
+* すべての Git / gh コマンドは実行結果を必ず表示
+* エラー時は「原因 + 次にできる操作」を必ず提示
+* rebase / merge 中の誤操作を防止
+
+### 6.2 性能
+
+* UIスレッドで外部プロセスをブロックしない
+* status 取得は `--porcelain` を使用
+* 大規模 repository でも UI フリーズを起こさない
+
+### 6.3 セキュリティ
+
+* 認証情報（Token/PAT）を保持しない
+* Git Credential Manager / gh auth に完全委譲
+* ログに秘密情報を出さない
+
+---
+
+## 7. UX / UI設計方針
+
+### 7.1 言語設計
+
+* UI文は日本語
+* Git用語のみ英語（commit / push / pull / rebase / conflict 等）
+* 言い換え禁止（記録する、取りこむ、などは使わない）
+
+### 7.2 画面構成
+
+**単一メイン画面構成**
+
+* 上：repository / branch / 状態表示
+* 左：Changes（staged / unstaged / untracked / conflicts）
+* 中央：diff 表示
+* 右：Action パネル（次にやること）
+* 下：Log / Console
+
+### 7.3 UX原則
+
+* 状態駆動UI（Gitの状態で表示内容を切り替える）
+* 推奨操作を常に1つ目立たせる
+* 危険操作は確認必須
+
+---
+
+## 8. Pull / Rebase / Conflict 設計
+
+### 8.1 pull の方針
+
+* `git pull --rebase` 固定
+* 作業ツリーが汚れている場合は実行前に停止
+
+### 8.2 conflict 発生時
+
+* UIを「復旧モード」に切り替え
+* 以下の操作のみ有効化：
+
+  1. Visual Studio で conflict を解決
+  2. rebase を continue
+  3. rebase を abort
+
+### 8.3 Visual Studio 連携
+
+* 優先順位：
+
+  1. Visual Studio 2022
+  2. Visual Studio 2026
+* `vswhere` を使用して検出
+* conflict ファイル一覧を表示し、直接開ける
+
+---
+
+## 9. 技術構成（How）
+
+### 9.1 技術スタック
+
+* 言語：C#
+* UI：WinForms または WPF
+* 外部依存：
+
+  * git（必須）
+  * gh（PR作成用）
+  * Visual Studio（conflict解決用）
+
+### 9.2 アーキテクチャ方針
+
+* UI層 / 状態管理 / コマンド実行層を分離
+* Git操作はすべて外部コマンド実行
+* stdout / stderr を一元的にログ管理
+
+---
+
+## 10. 初回起動体験
+
+1. git 検出
+2. gh 検出
+3. gh auth 状態確認
+4. repository 選択
+
+不足がある場合は
+**「何が足りないか」を1行で明示**し、案内ボタンを表示。
+
+---
+
+## 11. 想定ユースケース
+
+### ケース1：通常開発
+
+変更 → commit → push → Pull Request 作成 → GitHubでレビュー
+
+### ケース2：pull で conflict
+
+pull → conflict 発生 → VSで解決 → rebase continue → 通常状態復帰
+
+---
+
+## 12. 成功指標（KPI）
+
+* 初学者が **CLIを使わずにPR作成まで到達できる**
+* conflict 発生時に **abort せず解決できる割合が高い**
+* 「何をすればいいか分からない」状態がUI上に存在しない
+
+---
+
+## 13. 今後の拡張（MVP後）
+
+* UI文言のカスタマイズ（補足ON/OFF）
+* 教育用モード（コマンド解説表示）
+* GitHub Classroom への対応（検討）
+
+---
+
+## 14. 総評（率直に）
+
+この企画は、
+
+* **スコープが狭く**
+* **思想が一貫していて**
+* **教育と実務の両立ができている**
+
+かなり完成度が高い。
+下手に機能を足さなければ、
+**「ちゃんと使われるツール」になる設計**。
+
+---

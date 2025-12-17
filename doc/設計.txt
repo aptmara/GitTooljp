@@ -1,0 +1,353 @@
+---
+
+# 仕様書
+
+**GitHub連携型 Gitクライアント（PR作成特化）**
+
+---
+
+## 1. 本仕様書の位置づけ
+
+* 本書は本プロダクトの **最終仕様決定文書** とする
+* 記載のない挙動は **実装しない**
+* 曖昧な挙動は **安全側（操作させない）** を優先する
+
+---
+
+## 2. 対象環境
+
+### 2.1 対応OS
+
+* Windows 10 / 11（64bit）
+
+### 2.2 必須外部ツール
+
+| ツール                       | 必須       | 用途         |
+| ------------------------- | -------- | ---------- |
+| git                       | Yes      | ローカルGit操作  |
+| gh (GitHub CLI)           | PR作成時    | GitHub連携   |
+| Visual Studio 2022 / 2026 | Optional | conflict解決 |
+
+※ 上記が未検出でもアプリは起動する
+※ ただし該当機能は無効化するあるいはインストールを誘導
+
+---
+
+## 3. 用語・表記ルール
+
+### 3.1 言語方針
+
+* UI文言：日本語
+* Git用語：英語（原語）
+* ログ：英語（git / gh 出力をそのまま）
+
+### 3.2 用語固定表
+
+| 用語           | 表記           |
+| ------------ | ------------ |
+| commit       | commit       |
+| push         | push         |
+| pull         | pull         |
+| rebase       | rebase       |
+| conflict     | conflict     |
+| abort        | abort        |
+| continue     | continue     |
+| Pull Request | Pull Request |
+
+※ 言い換え禁止
+※ カタカナ禁止
+
+---
+
+## 4. 全体構成
+
+### 4.1 画面構成
+
+* 単一メイン画面
+* 補助：設定ダイアログのみ
+
+### 4.2 画面レイアウト
+
+```
++--------------------------------------------------+
+| Repo / Branch / Status Bar                        |
++---------+----------------------+----------------+
+| Changes | Diff View             | Action Panel  |
+|         |                        |               |
++---------+----------------------+----------------+
+| Log / Console (collapsible)                     |
++--------------------------------------------------+
+```
+
+---
+
+## 5. 状態定義（最重要）
+
+### 5.1 Git状態分類
+
+| 状態ID         | 説明                 |
+| ------------ | ------------------ |
+| CLEAN        | 変更なし               |
+| DIRTY        | commitされていない変更あり   |
+| UNPUSHED     | pushされていないcommitあり |
+| NO_UPSTREAM  | upstream未設定        |
+| REBASE       | rebase進行中          |
+| AUTH_NG      | gh未認証              |
+| TOOL_MISSING | git / gh 不足        |
+
+※ 状態は複合する（例：DIRTY + NO_UPSTREAM）
+
+---
+
+## 6. 状態 × 操作可否マトリクス
+
+| 操作              | CLEAN | DIRTY | UNPUSHED | REBASE |
+| --------------- | ----- | ----- | -------- | ------ |
+| commit          | ❌     | ⭕     | ❌        | ❌      |
+| push            | ❌     | ❌     | ⭕        | ❌      |
+| pull            | ⭕     | ⚠️    | ⭕        | ❌      |
+| Create PR       | ❌     | ❌     | ⭕        | ❌      |
+| rebase continue | ❌     | ❌     | ❌        | ⭕      |
+| rebase abort    | ❌     | ❌     | ❌        | ⭕      |
+
+⚠️ = 事前確認必須
+
+---
+
+## 7. 機能仕様（詳細）
+
+### 7.1 repository 検出
+
+* 開始ディレクトリから上位に `.git` を探索
+* 見つからない場合は選択ダイアログを表示
+* 最近使った repository を履歴保持（最大10件）
+
+---
+
+### 7.2 Changes パネル
+
+#### 表示区分
+
+1. Conflicts（rebase中のみ）
+2. Staged changes
+3. Unstaged changes
+4. Untracked files
+
+#### 操作
+
+* ファイル選択 → diff表示
+* チェックON → stage
+* チェックOFF → unstage
+
+---
+
+### 7.3 commit 機能
+
+#### 前提条件
+
+* Staged changes が1件以上
+
+#### 入力
+
+* commit message（必須）
+* commit body（任意）
+
+#### 実行
+
+```bash
+git commit -m "<title>" -m "<body>"
+```
+
+#### 失敗時
+
+* stderrを表示
+* 状態を変更しない
+
+---
+
+### 7.4 push 機能
+
+#### upstream 未設定時
+
+```bash
+git push --set-upstream origin <branch>
+```
+
+#### 設定済み
+
+```bash
+git push
+```
+
+#### 失敗時
+
+* 認証エラー → AUTH_NG
+* ネットワークエラー → 再試行案内
+
+---
+
+### 7.5 pull 機能（固定仕様）
+
+#### 実行コマンド
+
+```bash
+git pull --rebase
+```
+
+#### 事前チェック
+
+* DIRTY の場合 → ダイアログ表示
+
+  * commit する
+  * stash する
+  * cancel
+
+#### stash 選択時
+
+```bash
+git stash push -m "auto-stash before pull"
+```
+
+※ 自動で stash pop しない
+
+---
+
+### 7.6 conflict / rebase 復旧
+
+#### 判定条件
+
+* `.git/rebase-apply` or `.git/rebase-merge` 存在
+
+#### 表示
+
+* 状態：REBASE
+* Conflicted files：
+
+```bash
+git diff --name-only --diff-filter=U
+```
+
+#### 有効操作
+
+* Visual Studio で開く
+* rebase continue
+* rebase abort
+
+#### continue
+
+```bash
+git rebase --continue
+```
+
+#### abort
+
+```bash
+git rebase --abort
+```
+
+---
+
+### 7.7 Visual Studio 起動
+
+#### 検出優先度
+
+1. VS2022
+2. VS2026
+
+#### 検出方法
+
+* vswhere.exe 使用
+
+#### 起動内容
+
+* repository を開く
+* conflict ファイルをフォーカス
+
+---
+
+### 7.8 Pull Request 作成
+
+#### 前提条件
+
+* UNPUSHED が false
+* AUTH_NG が false
+
+#### 実行
+
+```bash
+gh pr create \
+  --base <default> \
+  --head <branch> \
+  --title "<title>" \
+  --body "<body>"
+```
+
+#### 成功時
+
+* PR URL を表示
+* 「GitHubで開く」ボタン有効化
+
+---
+
+## 8. ログ仕様
+
+### 8.1 出力内容
+
+* 実行コマンド
+* stdout
+* stderr
+* exit code
+
+### 8.2 マスキング
+
+* Token
+* Authorization header
+* gh_ プレフィックス
+
+---
+
+## 9. 設定仕様
+
+### 9.1 設定項目
+
+* git パス（自動 / 手動）
+* gh パス（自動 / 手動）
+* Visual Studio 使用可否
+* PR テンプレ（任意）
+
+---
+
+## 10. エラー処理方針
+
+* 例外はUIに直接出さない
+* 状態に変換して表示
+* 不明エラーはログ表示＋操作停止
+
+---
+
+## 11. 非対応事項（明示）
+
+* merge pull
+* cherry-pick
+* PRレビュー
+* PRマージ
+* 自動 conflict 解決
+
+---
+
+## 12. テスト観点（最低限）
+
+* rebase 中に危険操作ができない
+* conflict 発生→解決→continue で復帰
+* gh 未認証時に PR 作成不可
+* ログから原因が追える
+
+---
+
+## 13. 仕様変更ルール
+
+* 機能追加は本仕様書を改訂してから実装
+* 「便利そう」は理由にならない
+* UX一貫性を壊す変更は禁止
+
+---

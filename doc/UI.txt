@@ -1,0 +1,390 @@
+# UI設計書
+
+**GitHub連携型 Gitクライアント（PR作成特化 / pull --rebase 固定）**
+メッセージは日本語、Git用語のみ英語表記。
+
+---
+
+## 1. UI設計の目的
+
+* ユーザーが **迷わず** `commit → push → Pull Request` に到達できる
+* `pull --rebase` の `conflict` 発生時に **復旧手順が明確**で事故らない
+* Git用語は隠さず、ただし **状態と次の操作**を日本語で明示する
+
+---
+
+## 2. 画面一覧
+
+1. **メイン画面**（通常モード / 復旧モードを含む）
+2. **設定ダイアログ**（最小）
+3. **確認ダイアログ群**（stash / abort など）
+
+※ それ以外の画面は追加しない。
+
+---
+
+## 3. レイアウト（メイン画面）
+
+### 3.1 全体ワイヤー（ASCII）
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ Repo: [path/名前] (変更…)   Branch: feature/x   Status: DIRTY │
+│ Remote: origin/feature/x     Git: OK   gh: OK   VS: 2022       │
+├───────────────┬──────────────────────────────┬───────────────┤
+│ Changes       │ Diff                          │ Action        │
+│               │                               │               │
+│ [Conflicts]   │  (選択ファイルのdiff表示)      │ 推奨アクション │
+│ [Staged]      │                               │               │
+│ [Unstaged]    │                               │ [commit]      │
+│ [Untracked]   │                               │ [push]        │
+│               │                               │ [Create PR]   │
+├───────────────┴──────────────────────────────┴───────────────┤
+│ Log / Console  (折りたたみ可)                                   │
+│ > git status --porcelain=v1 -b                                  │
+│ stdout...                                                       │
+│ stderr...                                                       │
+│ [コピー] [診断ログを保存]                                       │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 3.2 ペイン比率
+
+* Changes：25%
+* Diff：50%
+* Action：25%
+* Log：既定は折りたたみ（エラー時は自動展開）
+
+---
+
+## 4. コンポーネント仕様
+
+## 4.1 ヘッダーバー（Status Bar）
+
+**表示項目**
+
+* Repo：現在のrepository（パスは省略表示、ホバーでフルパス）
+* Repo変更ボタン：`変更…`
+* Branch：現在のbranch名
+* Remote：追跡先（無ければ `upstream: なし`）
+* Status：状態ラベル（後述）
+* ツール検出：`Git: OK/NG`, `gh: OK/NG`, `VS: 2022/2026/なし`
+
+**ステータスラベル（文言固定）**
+
+* `CLEAN`：状態：変更はありません
+* `DIRTY`：状態：commit されていない変更があります
+* `UNPUSHED`：状態：push されていない commit があります
+* `NO_UPSTREAM`：状態：upstream が設定されていません
+* `REBASE`：状態：rebase が進行中です
+* `AUTH_NG`：状態：gh の認証が必要です
+
+※ 状態が複合する場合は優先順位で表示（REBASE > AUTH_NG > DIRTY > UNPUSHED > NO_UPSTREAM > CLEAN）
+
+---
+
+## 4.2 Changesペイン
+
+**セクション順（固定）**
+
+1. Conflicts（REBASE時のみ表示）
+2. Staged changes
+3. Unstaged changes
+4. Untracked files
+
+**ファイル行UI**
+
+* 左：チェックボックス（stage/unstage）
+* 中央：ファイルパス（相対）
+* 右：状態バッジ（M/A/D/R など1文字でも可）
+* ダブルクリック：既定エディタで開く
+* 右クリック（最小メニュー）：
+
+  * 開く
+  * エクスプローラーで表示
+  * パスをコピー
+
+**セクションヘッダー操作**
+
+* 折りたたみ
+* 件数表示（例：`Staged changes (3)`）
+
+---
+
+## 4.3 Diffペイン
+
+**基本**
+
+* 選択中ファイルの `diff` を表示
+* 上部にタブ：
+
+  * `unstaged diff`
+  * `staged diff`
+* 文字：等幅、折り返しはOFF（横スクロール）
+
+**conflictファイル時（REBASE時）**
+
+* 上部に警告バナー：
+
+  * `このファイルは conflict があります。Visual Studio で解決してください。`
+* バナー右にボタン：
+
+  * `Visual Studio で開く`
+
+---
+
+## 4.4 Actionペイン
+
+Actionは「推奨」1つを強調し、それ以外は通常ボタン。
+
+### 4.4.1 通常モード（REBASE以外）
+
+**ボタン（基本3つ）**
+
+* `commit`
+* `push`
+* `Create Pull Request`
+
+**補助表示（ボタン下の1行）**
+
+* commit：`staged changes を commit します`
+* push：`commit を remote に push します`
+* Create Pull Request：`GitHub に Pull Request を作成します`
+
+**有効/無効ルール（最低限）**
+
+* `commit`：Staged changesが0なら無効
+* `push`：UNPUSHEDがないなら無効（pushするものがない）
+* `Create Pull Request`：未pushなら無効（ただし「先にpush」導線を出す：後述）
+
+### 4.4.2 復旧モード（REBASE）
+
+Actionペインは復旧専用に置き換える。
+
+**表示**
+
+* タイトル：`rebase の復旧`
+* サマリ：`conflict があるファイル: N 件`
+
+**ボタン（固定）**
+
+1. `Visual Studio で conflict を解決`
+2. `rebase を continue`
+3. `rebase を abort`（危険ボタン、確認必須）
+
+**通常ボタン（commit/push/PR）は非表示**（押せると事故る）
+
+---
+
+## 4.5 Log / Console ペイン
+
+**目的**
+
+* 何を実行したかが追える（学習と保守のため）
+* エラー時に原因が見える
+
+**表示**
+
+* 実行コマンド（先頭に `>`）
+* stdout
+* stderr
+* exit code（行末に表示でも可）
+
+**操作**
+
+* `コピー`：表示内容をクリップボードへ
+* `診断ログを保存`：zip化（秘密情報はマスク）
+
+**自動挙動**
+
+* 成功時：折りたたみ維持（ユーザーが開いた場合は維持）
+* 失敗時：自動展開 + 先頭に日本語の要約メッセージ（1行）
+
+---
+
+## 5. 入力UI仕様
+
+## 5.1 commit入力（Actionペイン内の展開フォーム）
+
+`commit` ボタン押下で右ペイン内にフォームを展開（別画面にしない）
+
+* `commit message`（必須、1行）
+* `body`（任意、複数行）
+* ボタン：
+
+  * `commit を実行`
+  * `キャンセル`
+
+**入力バリデーション**
+
+* message空 → `commit message を入力してください`（日本語+英語用語）
+
+---
+
+## 5.2 Pull Request入力（Actionペイン内の展開フォーム）
+
+`Create Pull Request` 押下で展開
+
+* `タイトル`（必須）
+* `説明`（任意）
+* `base`（既定：default branch、変更可）
+* 表示のみ：`head: <current branch>`
+
+**ボタン**
+
+* `Pull Request を作成`
+* `キャンセル`
+
+**成功時**
+
+* `Pull Request を作成しました`
+* `GitHub で開く`（URLを開く）
+
+---
+
+## 6. ダイアログ仕様（確認・選択）
+
+## 6.1 DIRTY時の pull 実行前ダイアログ
+
+**タイトル**：`pull の前に確認`
+**本文**：
+
+* `commit されていない変更があります。pull --rebase を続けますか？`
+
+**選択肢（3つ固定）**
+
+1. `commit してから続ける`（commitフォームにフォーカス）
+2. `stash して pull する`（stash実行 → pull）
+3. `キャンセル`
+
+※ 「自動stash→自動pop」はやらない。popは事故率が上がる。
+
+---
+
+## 6.2 rebase abort 確認
+
+**タイトル**：`rebase を abort しますか？`
+**本文**：
+
+* `pull の前の状態に戻ります。`
+* `commit されていない変更は残ります。`
+
+**ボタン**
+
+* `abort`
+* `キャンセル`
+
+---
+
+## 6.3 upstream 未設定時の push 確認
+
+**タイトル**：`upstream がありません`
+**本文**：`upstream を設定して push しますか？`
+**ボタン**
+
+* `--set-upstream で push`
+* `キャンセル`
+
+---
+
+## 6.4 gh 未認証時の案内
+
+**表示場所**：Actionペイン上部（ダイアログではなく、案内カード）
+**文言**
+
+* `gh の認証が必要です。`
+* ボタン：`gh auth login を実行`
+
+---
+
+## 7. 状態別UI（表示・操作の最終仕様）
+
+### 7.1 CLEAN
+
+* 推奨：`pull`
+* commit/push/PR：無効
+* Status：`状態：変更はありません`
+
+### 7.2 DIRTY（Staged=0）
+
+* 推奨：`変更を stage する`（※ボタンは作らず、右ペインにガイド1行）
+* commit：無効
+* Status：`状態：commit されていない変更があります`
+
+### 7.3 DIRTY（Staged>0）
+
+* 推奨：`commit`
+* commit：有効
+* push/PR：状況により
+
+### 7.4 UNPUSHED
+
+* 推奨：`push`
+* push：有効
+* PR：有効（ただし未pushなら無効）
+
+### 7.5 NO_UPSTREAM
+
+* push押下で確認ダイアログ → `--set-upstream` 実行
+
+### 7.6 AUTH_NG（PR操作時）
+
+* PRフォームを開く前にブロックして案内表示
+* `gh auth login を実行` ボタンを提示
+
+### 7.7 REBASE（conflictあり）
+
+* 復旧モードに切替（Actionを復旧専用に）
+* ChangesにConflictsを表示
+* Diffに警告バナー＋VSで開く
+* 通常操作は無効/非表示
+
+---
+
+## 8. メッセージ仕様（例文固定・揺れ禁止）
+
+* `commit message を入力してください`
+* `commit が完了しました`
+* `push が完了しました`
+* `pull --rebase を実行しています`
+* `pull に失敗しました。rebase 中に conflict が発生しました`
+* `rebase を continue できます`
+* `rebase を abort できます`
+* `Pull Request を作成しました`
+* `GitHub で開く`
+
+---
+
+## 9. アクセシビリティ・操作性
+
+* 主要操作ショートカット（例）
+
+  * Ctrl+Enter：commit実行（commitフォーム時）
+  * Ctrl+P：push
+  * Ctrl+R：pull（rebase中は無効）
+* フォーカス移動：Tab順は左→中央→右→下
+* ログは選択・コピー可能
+* 文字サイズ：OS設定に追従（固定しない）
+
+---
+
+## 10. “やらない”UI（禁止事項）
+
+* conflict の自動解決ボタン（危険）
+* rebase/merge をUIで切替（固定：pull --rebase）
+* Git用語の言い換え（覚えるべきところ）
+* エラーをぼかすメッセージ（「失敗しました」だけ等）
+
+---
+
+## 11. 受入基準（UI観点）
+
+* 初見ユーザーが迷わず `commit → push → Pull Request` に到達できる
+* `pull --rebase` で conflict が出たとき、画面が復旧モードに切り替わり
+
+  * Conflicts一覧が見える
+  * VSで開ける
+  * continue/abortが押せる
+* エラー時、ログが自動で開き、原因が追える
+
+---
