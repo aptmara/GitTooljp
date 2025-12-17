@@ -24,6 +24,7 @@ public partial class MainViewModel : ObservableObject
 
     // Git Operation Lock (Semaphore for background tasks)
     private readonly SemaphoreSlim _gitLock = new(1, 1);
+    private int _pendingOperations = 0; // Track background ops
 
     // UI Locking
     /// @brief ビジー状態かどうか
@@ -148,22 +149,30 @@ public partial class MainViewModel : ObservableObject
 
     private async Task RefreshInternalAsync(bool showBusy)
     {
-        if (showBusy) IsBusy = true;
+        // IsBusy is ObservableProperty. We should set it on UI thread.
+        if (showBusy) Application.Current.Dispatcher.Invoke(() => IsBusy = true);
         try
         {
             Log("状態を更新しています...", false);
-            RepositoryPath = _gitService.CurrentRepositoryPath;
-            CurrentBranch = (await _gitService.GetStatusAsync()).Branch;
-            CurrentState = await _stateService.GetCurrentStateAsync();
             
-            var changes = (await _gitService.GetStatusAsync()).Changes;
+            // Background Fetch
+            var repoPath = _gitService.CurrentRepositoryPath;
+            var status = await _gitService.GetStatusAsync();
+            var currentState = await _stateService.GetCurrentStateAsync();
+            var changes = status.Changes;
+            
+            // UI Update
             Application.Current.Dispatcher.Invoke(() =>
             {
+                RepositoryPath = repoPath;
+                CurrentBranch = status.Branch;
+                CurrentState = currentState;
+                
                 Changes.Clear();
                 foreach (var c in changes) Changes.Add(c);
             });
             Log("状態更新完了: " + StatusMessage, false);
-            NotifyCommandsCanExecuteChanged();
+            Application.Current.Dispatcher.Invoke(NotifyCommandsCanExecuteChanged);
         }
         catch (Exception ex)
         {
@@ -171,7 +180,7 @@ public partial class MainViewModel : ObservableObject
         }
         finally
         {
-            if (showBusy) IsBusy = false;
+            if (showBusy) Application.Current.Dispatcher.Invoke(() => IsBusy = false);
         }
     }
 
@@ -512,68 +521,134 @@ public partial class MainViewModel : ObservableObject
 
     /// @brief 全ファイルをステージするコマンド (全選択)
     [RelayCommand]
-    private async Task StageAllAsync()
+    private void StageAll()
     {
-        await RunGitOperationInBackgroundAsync(async () => 
-        {
-            Log("全ファイルをStage(全選択)しています...", false);
-            var unstaged = Changes.Where(c => !c.IsStaged).ToList();
-            if (!unstaged.Any()) return;
+        // Optimistic Update
+        foreach (var c in Changes) c.IsStaged = true;
 
-            foreach(var f in unstaged)
+        // Fire and Forget (Queue)
+        Interlocked.Increment(ref _pendingOperations);
+        Task.Run(async () => 
+        {
+            await _gitLock.WaitAsync();
+            try
             {
-                 await _gitService.StageFileAsync(f.FilePath);
+                Log("全ファイルをStage(全選択)しています...", false);
+                var unstaged = Changes.Where(c => !c.IsStaged).ToList(); // Re-evaluate if valid logic? No, Model is Staged=true now.
+                // We should rely on Git status or just Force Add all?
+                // Git add . is safest for "Stage All".
+                // But GitService StageFileAsync is per file.
+                // Optimistic UI set IsStaged=true.
+                // We need to know which files were actually unstaged before we flipped them?
+                // Or just assume `git add .` adds everything.
+                // Let's use `git add .` equivalent logic if possible, or iterate all files.
+                // To be safe with optimistic, we should just iterate all files that WERE unstaged.
+                // But we just lost that info by setting IsStaged=true.
+                // Actually, `git add` on already staged file is no-op. So just iterate all.
+                
+                // However, iterating Changes collection from background thread might be unsafe collection access?
+                // Changes is ObservableCollection.
+                // Better snapshot it.
+                List<string> paths;
+                lock(Changes) { paths = Changes.Select(c => c.FilePath).ToList(); }
+
+                foreach(var path in paths)
+                {
+                     await _gitService.StageFileAsync(path);
+                }
+                Log("全ファイルのStage完了", false);
             }
-            Log("全ファイルのStage完了", false);
+            finally
+            {
+                _gitLock.Release();
+                if (Interlocked.Decrement(ref _pendingOperations) == 0)
+                {
+                    await RefreshInternalAsync(false);
+                }
+            }
         });
-        await RefreshInternalAsync(false); // Silent refresh
     }
 
     /// @brief 全ファイルのステージ解除コマンド (全解除)
     [RelayCommand]
-    private async Task UnstageAllAsync()
+    private void UnstageAll()
     {
-        await RunGitOperationInBackgroundAsync(async () => 
-        {
-            Log("全ファイルをUnstage(全解除)しています...", false);
-            var staged = Changes.Where(c => c.IsStaged).ToList();
-            if (!staged.Any()) return;
+        // Optimistic Update
+        foreach (var c in Changes) c.IsStaged = false;
 
-            foreach(var f in staged)
+        Interlocked.Increment(ref _pendingOperations);
+        Task.Run(async () => 
+        {
+            await _gitLock.WaitAsync();
+            try
             {
-                 await _gitService.UnstageFileAsync(f.FilePath);
+                Log("全ファイルをUnstage(全解除)しています...", false);
+                List<string> paths;
+                lock(Changes) { paths = Changes.Select(c => c.FilePath).ToList(); }
+
+                foreach(var path in paths)
+                {
+                     await _gitService.UnstageFileAsync(path);
+                }
+                Log("全ファイルのUnstage完了", false);
             }
-            Log("全ファイルのUnstage完了", false);
+            finally
+            {
+                _gitLock.Release();
+                if (Interlocked.Decrement(ref _pendingOperations) == 0)
+                {
+                    await RefreshInternalAsync(false);
+                }
+            }
         });
-        await RefreshInternalAsync(false); // Silent refresh
     }
 
-    /// @brief 個別ファイルをステージ切り替え (バックグラウンド)
+    /// @brief 個別ファイルをステージ切り替え (バックグラウンド・キュー待ち)
     [RelayCommand]
-    private async Task ToggleStageAsync(FileChangeEntry? entry)
+    private void ToggleStage(FileChangeEntry? entry)
     {
         if (entry == null) return;
         
-        await RunGitOperationInBackgroundAsync(async () => 
-        {
-            ProcessResult result;
-            if (entry.IsStaged)
-            {
-                Log($"Unstaging {entry.FilePath}...", false);
-                result = await _gitService.UnstageFileAsync(entry.FilePath);
-            }
-            else
-            {
-                Log($"Staging {entry.FilePath}...", false);
-                result = await _gitService.StageFileAsync(entry.FilePath);
-            }
+        // Optimistic Update (Flip local state)
+        // Entry is ObservableObject, so UI updates instantly.
+        bool newState = !entry.IsStaged;
+        entry.IsStaged = newState; // Flip
 
-            if (!result.Success)
+        Interlocked.Increment(ref _pendingOperations);
+        Task.Run(async () => 
+        {
+            await _gitLock.WaitAsync();
+            try
             {
-                Log($"Staging操作失敗: {result.StandardError}", true);
+                ProcessResult result;
+                if (!newState) // target is Unstaged
+                {
+                    Log($"Unstaging {entry.FilePath}...", false);
+                    result = await _gitService.UnstageFileAsync(entry.FilePath);
+                }
+                else
+                {
+                    Log($"Staging {entry.FilePath}...", false);
+                    result = await _gitService.StageFileAsync(entry.FilePath);
+                }
+
+                if (!result.Success)
+                {
+                    Log($"Staging操作失敗: {result.StandardError}", true);
+                    // Revert optimistic update on failure?
+                    // Entry might have changed again. Complex.
+                    // Ideally yes, but for MVP just log error.
+                }
+            }
+            finally
+            {
+                _gitLock.Release();
+                if (Interlocked.Decrement(ref _pendingOperations) == 0)
+                {
+                    await RefreshInternalAsync(false);
+                }
             }
         });
-        await RefreshInternalAsync(false); // Silent refresh
     }
 
     private async Task RunGitOperationInBackgroundAsync(Func<Task> action)
