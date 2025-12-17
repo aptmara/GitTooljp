@@ -683,30 +683,38 @@ public partial class MainViewModel : ObservableObject
     
     private async Task CheckDependenciesAsync()
     {
-        try
+        while (true)
         {
-            // Check Git
-            using var gitProc = new Process();
-            gitProc.StartInfo = new ProcessStartInfo("git", "--version") { UseShellExecute = false, CreateNoWindow = true };
-            gitProc.Start();
-            await gitProc.WaitForExitAsync();
-            if (gitProc.ExitCode != 0) 
+            bool isGitOk = await _toolDetector.IsGitAvailableAsync();
+            bool isGhOk = await _toolDetector.IsGhAvailableAsync();
+
+            if (isGitOk && isGhOk) return;
+
+            // Show Dependency Window
+            bool retry = false;
+            await Application.Current.Dispatcher.InvokeAsync(() =>
             {
-                MessageBox.Show("Git が正しくインストールされていないか、PATHに通っていません。\nGitをインストールしてください。", "致命的エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            // Check gh
-            using var ghProc = new Process();
-            ghProc.StartInfo = new ProcessStartInfo("gh", "--version") { UseShellExecute = false, CreateNoWindow = true };
-            ghProc.Start();
-            await ghProc.WaitForExitAsync();
-             if (ghProc.ExitCode != 0) 
+                var window = new DependencyWindow(!isGitOk, !isGhOk);
+                window.Owner = Application.Current.MainWindow;
+                window.ShowDialog();
+                retry = window.RetryRequested;
+            });
+
+            if (!retry)
             {
-                // Just log header? Or flag?
+                // User cancelled or closed without retry request
+                // We can't proceed properly.
+                // Optionally shutdown or allow limited mode.
+                // For now, warn and allow limited (but likely broken) use or just exit?
+                // Spec says tool is "required".
+                var res = MessageBox.Show("必須ツールが不足しているため、アプリケーションが正しく動作しない可能性があります。\n終了しますか？", "確認", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (res == MessageBoxResult.Yes)
+                {
+                    Application.Current.Shutdown();
+                }
+                return;
             }
-        }
-        catch
-        {
-             // Ignore for now or handle gracefully
+            // Loop back to re-check
         }
     }
 
