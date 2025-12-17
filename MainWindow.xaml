@@ -35,7 +35,8 @@
                     <TextBlock Text="{Binding RepositoryPath}" Margin="0,0,15,0"/>
                     <Button Content="Change" Command="{Binding CloseRepositoryCommand}" Padding="5,0"/>
                     <TextBlock Text="Branch: " FontWeight="Bold" Margin="15,0,0,0"/>
-                    <ComboBox ItemsSource="{Binding Branches}" SelectedItem="{Binding SelectedBranch}" Margin="5,0,15,0" Width="200"/>
+                    <ComboBox ItemsSource="{Binding Branches}" SelectedItem="{Binding SelectedBranch}" Margin="5,0,5,0" Width="200"/>
+                    <Button Content="🗑" Command="{Binding DeleteBranchFlowCommand}" ToolTip="ブランチ削除" Padding="5,0" Margin="0,0,15,0"/>
                     <TextBlock Text="{Binding StatusMessage}" Foreground="#007ACC" FontWeight="SemiBold" Margin="15,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">

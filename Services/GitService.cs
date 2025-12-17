@@ -234,6 +234,15 @@ public class GitService
         return res.Success ? res.StandardOutput.Trim() : string.Empty;
     }
 
+    /// @brief ブランチを削除する
+    /// @param branchName 削除するブランチ名
+    /// @param force 強制削除するかどうか (-D)
+    public async Task<ProcessResult> DeleteBranchAsync(string branchName, bool force = false, CancellationToken ct = default)
+    {
+        var flag = force ? "-D" : "-d";
+        return await _runner.RunAsync("git", $"branch {flag} \"{EscapeArg(branchName)}\"", _repoPath, ct);
+    }
+
     /// @brief リポジトリをCloneする
     public async Task<ProcessResult> CloneAsync(string url, string destinationPath, CancellationToken ct = default)
     {

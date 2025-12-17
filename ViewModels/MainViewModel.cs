@@ -398,6 +398,67 @@ public partial class MainViewModel : ObservableObject
          }
     }
 
+    [RelayCommand]
+    private void DeleteBranchFlow()
+    {
+        // Filter out current branch to prevent deleting it
+        var deletableBranches = Branches.Where(b => b != CurrentBranch && b != "[作成...]").ToList();
+
+        if (!deletableBranches.Any())
+        {
+            MessageBox.Show("削除可能なブランチがありません（現在のブランチは削除できません）。", "情報", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var window = new BranchDeletionWindow(deletableBranches);
+        window.Owner = Application.Current.MainWindow;
+        if (window.ShowDialog() == true)
+        {
+            var targets = window.SelectedBranches;
+            if (targets.Any())
+            {
+                Task.Run(async () => await DeleteBranchesAsync(targets));
+            }
+        }
+    }
+
+    private async Task DeleteBranchesAsync(List<string> branches)
+    {
+        Application.Current.Dispatcher.Invoke(() => IsBusy = true);
+        try
+        {
+            foreach (var branch in branches)
+            {
+                Log($"Delete Branch: {branch}...", false);
+                var result = await _gitService.DeleteBranchAsync(branch);
+                
+                if (!result.Success && (result.StandardError.Contains("not fully merged") || result.StandardError.Contains("not merged")))
+                {
+                   var res = MessageBox.Show($"ブランチ '{branch}' はマージされていません。\n強制削除しますか？", "確認", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                   if (res == MessageBoxResult.Yes)
+                   {
+                        result = await _gitService.DeleteBranchAsync(branch, true);
+                   }
+                }
+
+                if (result.Success)
+                {
+                    Log($"削除完了: {branch}", false);
+                }
+                else
+                {
+                    Log($"削除失敗 ({branch}):\n{result.StandardError}", true);
+                }
+            }
+            await RefreshInternalAsync(true);
+        }
+        catch (Exception ex)
+        {
+            Log("Error: " + ex.Message, true);
+            Application.Current.Dispatcher.Invoke(() => IsBusy = false);
+        }
+    }
+
     // README Viewer Properties
     [ObservableProperty]
     private bool _isReadmeVisible = false;
