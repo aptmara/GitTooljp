@@ -43,7 +43,7 @@ public class SettingsService
         try
         {
             var dir = Path.GetDirectoryName(SettingsFile);
-            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            if (dir != null && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
 
             var json = JsonSerializer.Serialize(Settings);
             File.WriteAllText(SettingsFile, json);
