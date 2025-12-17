@@ -197,6 +197,33 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        // Check Staged
+        bool anyStaged;
+        lock(Changes) { anyStaged = Changes.Any(c => c.IsStaged); }
+        
+        if (!anyStaged)
+        {
+            var res = MessageBox.Show("ステージされているファイルがありません。\nすべての変更をステージしてコミットしますか？", "確認", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (res == MessageBoxResult.Yes)
+            {
+                // Stage All (Awaitable but we need to utilize the one that tracks pending ops)
+                // However, Commit wants to proceed immediately.
+                // If we use fire-and-forget StageAll, we can't wait properly?
+                // Actually StageFilesInternalAsync above awaits completion of the background task.
+                // So we can await it.
+                await StageAllInternalAsync();
+                
+                // Re-check? Or just assume success.
+                // The StageAllInternalAsync releases lock before returning?
+                // Yes, WaitAsync / Release.
+                // So we can proceed to Commit logic which acquires lock again.
+            }
+            else
+            {
+                return;
+            }
+        }
+
         IsBusy = true; // Block UI for commit
         try
         {
@@ -233,7 +260,60 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private bool CanCommit() => IsNotBusy && !IsRebaseMode && CurrentState.HasFlag(RepoState.Dirty); // 厳密には Staged > 0 も必要だが簡略化
+    private bool CanCommit() => IsNotBusy && !IsRebaseMode && CurrentState.HasFlag(RepoState.Dirty);
+
+    /// @brief 内部用: ファイルリストをステージする (ロック確保済みであることを前提としない、内部でロックする)
+    /// @param paths ステージ対象ファイル
+    /// @return 成功したかどうか
+    private async Task StageFilesInternalAsync(List<string> paths)
+    {
+        if (!paths.Any()) return;
+
+        // Optimistic Update (UI Thread)
+        Application.Current.Dispatcher.Invoke(() => 
+        {
+             foreach(var p in paths)
+             {
+                 var entry = Changes.FirstOrDefault(c => c.FilePath == p);
+                 if(entry != null) entry.IsStaged = true;
+             }
+        });
+        
+        // Background Op
+        Interlocked.Increment(ref _pendingOperations);
+        try
+        {
+            await _gitLock.WaitAsync();
+            try
+            {
+                Log($"ステージング実行 ({paths.Count} files)...", false);
+                foreach(var path in paths)
+                {
+                     await _gitService.StageFileAsync(path);
+                }
+                Log("ステージング完了", false);
+            }
+            finally
+            {
+                _gitLock.Release();
+            }
+        }
+        finally
+        {
+            if (Interlocked.Decrement(ref _pendingOperations) == 0)
+            {
+                await RefreshInternalAsync(false);
+            }
+        }
+    }
+
+    /// @brief 内部用: 全ファイルをステージする (呼び出し元で待機可能)
+    private async Task StageAllInternalAsync()
+    {
+         List<string> paths;
+         lock(Changes) { paths = Changes.Select(c => c.FilePath).ToList(); }
+         await StageFilesInternalAsync(paths);
+    }
 
     /// @brief Pushを実行するコマンド
     [RelayCommand(CanExecute = nameof(CanPush))]
@@ -526,50 +606,8 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void StageAll()
     {
-        // Optimistic Update
-        foreach (var c in Changes) c.IsStaged = true;
-
-        // Fire and Forget (Queue)
-        Interlocked.Increment(ref _pendingOperations);
-        Task.Run(async () => 
-        {
-            await _gitLock.WaitAsync();
-            try
-            {
-                Log("全ファイルをStage(全選択)しています...", false);
-                var unstaged = Changes.Where(c => !c.IsStaged).ToList(); // Re-evaluate if valid logic? No, Model is Staged=true now.
-                // We should rely on Git status or just Force Add all?
-                // Git add . is safest for "Stage All".
-                // But GitService StageFileAsync is per file.
-                // Optimistic UI set IsStaged=true.
-                // We need to know which files were actually unstaged before we flipped them?
-                // Or just assume `git add .` adds everything.
-                // Let's use `git add .` equivalent logic if possible, or iterate all files.
-                // To be safe with optimistic, we should just iterate all files that WERE unstaged.
-                // But we just lost that info by setting IsStaged=true.
-                // Actually, `git add` on already staged file is no-op. So just iterate all.
-                
-                // However, iterating Changes collection from background thread might be unsafe collection access?
-                // Changes is ObservableCollection.
-                // Better snapshot it.
-                List<string> paths;
-                lock(Changes) { paths = Changes.Select(c => c.FilePath).ToList(); }
-
-                foreach(var path in paths)
-                {
-                     await _gitService.StageFileAsync(path);
-                }
-                Log("全ファイルのStage完了", false);
-            }
-            finally
-            {
-                _gitLock.Release();
-                if (Interlocked.Decrement(ref _pendingOperations) == 0)
-                {
-                    await RefreshInternalAsync(false);
-                }
-            }
-        });
+        // Fire and Forget
+        _ = StageAllInternalAsync();
     }
 
     /// @brief 全ファイルのステージ解除コマンド (全解除)
