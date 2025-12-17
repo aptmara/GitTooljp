@@ -43,13 +43,10 @@ public partial class MainWindow : Window
 
         var viewModel = new MainViewModel(gitService, gitHubService, stateService, toolDetector);
         
-        // Initial Refresh
+        // Initial Refresh (Silent)
         Loaded += async (s, e) => 
         {
-             // Manually trigger RefreshCommand if possible or call method
-             // Command execution is async void usually in UI events
-             if (viewModel.RefreshCommand.CanExecute(null))
-                 viewModel.RefreshCommand.Execute(null);
+             await viewModel.InitializeAsync();
         };
 
         DataContext = viewModel;

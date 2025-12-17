@@ -147,6 +147,9 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(IsNotBusy))]
     private Task RefreshAsync() => RefreshInternalAsync(true);
 
+    /// @brief 初期化 (サイレント読み込み)
+    public Task InitializeAsync() => RefreshInternalAsync(false);
+
     private async Task RefreshInternalAsync(bool showBusy)
     {
         // IsBusy is ObservableProperty. We should set it on UI thread.
