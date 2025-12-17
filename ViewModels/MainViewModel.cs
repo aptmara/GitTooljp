@@ -128,6 +128,132 @@ public partial class MainViewModel : ObservableObject
     /// @brief ログリスト
     public ObservableCollection<LogEntry> Logs { get; } = new();
 
+    /// @brief ブランチ一覧
+    public ObservableCollection<string> Branches { get; } = new();
+
+    /// @brief 選択されたブランチ (UIバインド用)
+    [ObservableProperty]
+    private string _selectedBranch = string.Empty;
+
+    private bool _isChangingBranch = false;
+
+    async partial void OnSelectedBranchChanged(string value)
+    {
+        if (_isChangingBranch) return; // Ignore internal updates
+        if (string.IsNullOrEmpty(value)) return;
+
+        if (value == "[作成...]")
+        {
+            // Reset selection to current just in case cancel
+            // Logic needed to handle creation.
+            // We need a way to invoke UI from ViewModel properly or use a Service.
+            // For MVP, simplistic interactions.
+            // Dispatcher invoke for Dialog?
+            
+            // Revert selection first to avoid getting stuck
+            _isChangingBranch = true;
+            SelectedBranch = CurrentBranch;
+            _isChangingBranch = false;
+
+            Application.Current.Dispatcher.Invoke(CreateNewBranchFlow);
+            return;
+        }
+
+        if (value == CurrentBranch) return; // No change
+
+        // Checkout Flow
+        if (CurrentState.HasFlag(RepoState.Dirty))
+        {
+            var res = MessageBox.Show("変更が残っています。ブランチを切り替えるには Stash または Commit が必要です。\n\nStash して切り替えますか？", "確認", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (res == MessageBoxResult.No)
+            {
+                 // Revert selection
+                 _isChangingBranch = true;
+                 SelectedBranch = CurrentBranch;
+                 _isChangingBranch = false;
+                 return;
+            }
+            
+            // Stash logic
+            IsBusy = true;
+            await _gitService.StashAsync($"Auto-stash before checkout {value}");
+            IsBusy = false;
+        }
+
+        // Checkout
+        IsBusy = true;
+        try
+        {
+            Log($"Checkout {value}...", false);
+            var result = await _gitService.CheckoutAsync(value);
+            if (result.Success)
+            {
+                Log($"Checkout 完了: {value}", false);
+                await RefreshInternalAsync(true);
+            }
+            else
+            {
+                Log($"Checkout 失敗:\n{result.StandardError}", true);
+                
+                // Revert selection
+                _isChangingBranch = true;
+                SelectedBranch = CurrentBranch;
+                _isChangingBranch = false;
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void CreateNewBranchFlow()
+    {
+        // Simple Input Dialog needed. 
+        // Using Microsoft.VisualBasic.Interaction.InputBox is easiest but requires ref.
+        // Or simple custom Window.
+        // Let's use a very simple InputBox helper or assume InputWindow class exists.
+        // I will create InputWindow next.
+        
+        var inputWindow = new InputWindow("新しいブランチ名を入力:", "ブランチ作成");
+        if (inputWindow.ShowDialog() == true)
+        {
+            var newBranch = inputWindow.InputText;
+            if (string.IsNullOrWhiteSpace(newBranch)) return;
+
+            // Trigger create async
+            Task.Run(async () => await CreateBranchAsync(newBranch));
+        }
+    }
+
+    private async Task CreateBranchAsync(string branchName)
+    {
+         // Needs dirty check? Checkout -b carries changes usually.
+         // But allow user to keep changes.
+         
+         Application.Current.Dispatcher.Invoke(() => IsBusy = true);
+         try
+         {
+             Log($"ブランチ作成 & Checkout: {branchName}...", false);
+             var result = await _gitService.CreateBranchAsync(branchName);
+             if (result.Success)
+             {
+                 Log("作成完了", false);
+                 await RefreshInternalAsync(true);
+             }
+             else
+             {
+                 Log($"作成失敗:\n{result.StandardError}", true);
+                 Application.Current.Dispatcher.Invoke(() => IsBusy = false);
+             }
+         }
+         catch (Exception ex)
+         {
+             Log("エラー: " + ex.Message, true);
+             Application.Current.Dispatcher.Invoke(() => IsBusy = false);
+         }
+    }
+
     // Commands
     
     /// @brief コンストラクタ
@@ -163,6 +289,7 @@ public partial class MainViewModel : ObservableObject
             var status = await _gitService.GetStatusAsync();
             var currentState = await _stateService.GetCurrentStateAsync();
             var changes = status.Changes;
+            var branches = await _gitService.GetLocalBranchesAsync();
             
             // UI Update
             Application.Current.Dispatcher.Invoke(() =>
@@ -173,6 +300,16 @@ public partial class MainViewModel : ObservableObject
                 
                 Changes.Clear();
                 foreach (var c in changes) Changes.Add(c);
+
+                // Branch List Update
+                Branches.Clear();
+                foreach (var b in branches) Branches.Add(b);
+                Branches.Add("[作成...]");
+                
+                // Avoid triggering OnSelectedBranchChanged logic during refresh
+                _isChangingBranch = true;
+                SelectedBranch = status.Branch;
+                _isChangingBranch = false;
             });
             Log("状態更新完了: " + StatusMessage, false);
             Application.Current.Dispatcher.Invoke(NotifyCommandsCanExecuteChanged);
