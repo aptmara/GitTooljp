@@ -263,4 +263,11 @@ public class GitService
         if (!Directory.Exists(path)) Directory.CreateDirectory(path);
         return await _runner.RunAsync("git", "init", path, ct);
     }
+
+    /// @brief 指定したリモートのURLを取得する
+    public async Task<string> GetRemoteUrlAsync(string remote = "origin", CancellationToken ct = default)
+    {
+        var res = await _runner.RunAsync("git", $"remote get-url {remote}", _repoPath, ct);
+        return res.Success ? res.StandardOutput.Trim() : string.Empty;
+    }
 }
