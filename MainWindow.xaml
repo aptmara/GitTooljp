@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:SimplePRClient"
         xmlns:vm="clr-namespace:SimplePRClient.ViewModels"
+        xmlns:helpers="clr-namespace:SimplePRClient.Helpers"
         mc:Ignorable="d"
         Title="Simple PR Client" Height="700" Width="1000"
         WindowStartupLocation="CenterScreen">
@@ -12,6 +13,7 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <local:BoolToColorConverter x:Key="BoolToColorConverter"/>
+        <local:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis"/>
     </Window.Resources>
 
     <Grid>
@@ -31,11 +33,14 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="Repo: " FontWeight="Bold"/>
                     <TextBlock Text="{Binding RepositoryPath}" Margin="0,0,15,0"/>
-                    <TextBlock Text="Branch: " FontWeight="Bold"/>
-                    <TextBlock Text="{Binding CurrentBranch}" Margin="0,0,15,0"/>
-                    <TextBlock Text="{Binding StatusMessage}" Foreground="#007ACC" FontWeight="SemiBold"/>
+                    <Button Content="Change" Command="{Binding CloseRepositoryCommand}" Padding="5,0"/>
+                    <TextBlock Text="Branch: " FontWeight="Bold" Margin="15,0,0,0"/>
+                    <ComboBox ItemsSource="{Binding Branches}" SelectedItem="{Binding SelectedBranch}" Margin="5,0,15,0" Width="200"/>
                 </StackPanel>
-                <Button Grid.Column="1" Content="再読み込み" Command="{Binding RefreshCommand}" Padding="10,2"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                     <Button Content="{Binding ReadmeButtonText}" Command="{Binding ToggleReadmeCommand}" Padding="10,2" Margin="0,0,5,0"/>
+                     <Button Content="再読み込み" Command="{Binding RefreshCommand}" Padding="10,2"/>
+                </StackPanel>
             </Grid>
         </Border>
 
@@ -85,9 +90,14 @@
             <!-- 2. Diff Panel -->
             <DockPanel Grid.Column="1" Margin="5,0">
                 <TextBlock Text="Diff" FontWeight="Bold" DockPanel.Dock="Top" Margin="0,0,0,5"/>
-                <TextBox Text="{Binding DiffText, Mode=OneWay}" IsReadOnly="True" 
-                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                         FontFamily="Consolas"/>
+                <Grid>
+                    <TextBox Text="{Binding DiffText, Mode=OneWay}" IsReadOnly="True" 
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                             FontFamily="Consolas"/>
+                    <!-- README Viewer Overlay -->
+                    <WebBrowser Visibility="{Binding IsReadmeVisible, Converter={StaticResource BoolToVis}}"
+                                helpers:BrowserBehavior.Html="{Binding ReadmeHtml}"/>
+                </Grid>
             </DockPanel>
 
             <GridSplitter Grid.Column="1" Width="5"/>
@@ -152,29 +162,58 @@
             </ScrollViewer>
         </Grid>
 
-        <!-- Footer / Log -->
-        <Expander Grid.Row="2" IsExpanded="False" MaxHeight="200">
-            <Expander.Header>
-                 <StackPanel Orientation="Horizontal">
-                     <TextBlock Text="Log / Console" Margin="0,0,10,0"/>
-                     <TextBlock Background="Transparent">
-                        <Hyperlink Command="{Binding CopyLogCommand}">
-                            <Run Text="[Copy Log]"/>
-                        </Hyperlink>
-                     </TextBlock>
-                 </StackPanel>
-            </Expander.Header>
-            <ListBox ItemsSource="{Binding Logs}" Height="150" SelectionMode="Extended" FontFamily="Consolas">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <TextBlock Text="{Binding}" 
-                                   Foreground="{Binding IsError, Converter={StaticResource BoolToColorConverter}}" 
-                                   TextWrapping="Wrap"/>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </Expander>
-        
+        <!-- Startup / Repo Selection Overlay -->
+        <Grid Grid.RowSpan="3" Visibility="{Binding IsNotRepositoryValid, Converter={StaticResource BoolToVis}}" Background="#F0F0F0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="300"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Main Menu -->
+            <StackPanel Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="Simple PR Client" FontSize="32" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,30"/>
+                
+                <Button Command="{Binding OpenRepositoryFlowCommand}" Width="250" Height="50" Margin="0,0,0,15">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="📂" FontSize="20" Margin="0,0,10,0"/>
+                        <TextBlock Text="Open Folder" FontSize="16" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+
+                <Button Command="{Binding CloneRepositoryFlowCommand}" Width="250" Height="50" Margin="0,0,0,15">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="📥" FontSize="20" Margin="0,0,10,0"/>
+                        <TextBlock Text="Clone Repository" FontSize="16" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
+            <!-- Recent History -->
+            <Border Grid.Column="1" Background="White" Margin="0,20,20,20" Padding="10" CornerRadius="5">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="10" ShadowDepth="2" Direction="270" Color="#CCC" Opacity="0.5"/>
+                </Border.Effect>
+                <DockPanel>
+                    <TextBlock Text="Recent Repositories" FontWeight="Bold" DockPanel.Dock="Top" Margin="0,0,0,10"/>
+                    <ListBox ItemsSource="{Binding RecentRepositories}">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Padding" Value="5"/>
+                                <Setter Property="Cursor" Value="Hand"/>
+                                <EventSetter Event="MouseDoubleClick" Handler="RecentRepo_MouseDoubleClick"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" ToolTip="{Binding}"/>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+        </Grid>
+
         <!-- Busy Overlay -->
         <Grid Grid.RowSpan="3" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" Background="#80FFFFFF">
             <ProgressBar IsIndeterminate="True" Width="200" Height="20" VerticalAlignment="Center"/>

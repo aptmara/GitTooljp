@@ -40,8 +40,9 @@ public partial class MainWindow : Window
 
         var stateService = new StateService(gitService, gitHubService);
         var toolDetector = new ToolDetector();
+        var settingsService = new SettingsService();
 
-        var viewModel = new MainViewModel(gitService, gitHubService, stateService, toolDetector);
+        var viewModel = new MainViewModel(gitService, gitHubService, stateService, toolDetector, settingsService);
         
         // Initial Refresh (Silent)
         Loaded += async (s, e) => 
@@ -50,6 +51,18 @@ public partial class MainWindow : Window
         };
 
         DataContext = viewModel;
+    }
+
+    private void RecentRepo_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is System.Windows.Controls.ListBoxItem item && item.Content is string path)
+        {
+             if (DataContext is MainViewModel vm)
+             {
+                 if (vm.OpenRecentRepositoryCommand.CanExecute(path))
+                    vm.OpenRecentRepositoryCommand.Execute(path);
+             }
+        }
     }
 }
 

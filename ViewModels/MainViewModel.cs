@@ -20,7 +20,9 @@ public partial class MainViewModel : ObservableObject
     private readonly GitService _gitService;
     private readonly GitHubService _gitHubService;
     private readonly StateService _stateService;
+
     private readonly ToolDetector _toolDetector;
+    private readonly SettingsService _settingsService;
 
     // Git Operation Lock (Semaphore for background tasks)
     private readonly SemaphoreSlim _gitLock = new(1, 1);
@@ -65,6 +67,16 @@ public partial class MainViewModel : ObservableObject
 
     /// @brief Rebaseモードかどうか
     public bool IsRebaseMode => CurrentState.HasFlag(RepoState.Rebase);
+
+    // Repository Management
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsNotRepositoryValid))]
+    [NotifyPropertyChangedFor(nameof(StatusMessage))]
+    private bool _isRepositoryValid = false;
+    
+    public bool IsNotRepositoryValid => !IsRepositoryValid;
+
+    public ObservableCollection<string> RecentRepositories { get; } = new();
 
     // Data
     /// @brief リポジトリのパス
@@ -128,6 +140,349 @@ public partial class MainViewModel : ObservableObject
     /// @brief ログリスト
     public ObservableCollection<LogEntry> Logs { get; } = new();
 
+    /// @brief ブランチ一覧
+    public ObservableCollection<string> Branches { get; } = new();
+
+    /// @brief 選択されたブランチ (UIバインド用)
+    [ObservableProperty]
+    private string _selectedBranch = string.Empty;
+
+    private bool _isChangingBranch = false;
+
+    async partial void OnSelectedBranchChanged(string value)
+    {
+        if (_isChangingBranch) return; 
+        if (string.IsNullOrEmpty(value)) return;
+
+        if (value == "[作成...]")
+        {
+            _isChangingBranch = true;
+            SelectedBranch = CurrentBranch;
+            _isChangingBranch = false;
+            Application.Current.Dispatcher.Invoke(CreateNewBranchFlow);
+            return;
+        }
+
+        if (value == CurrentBranch) return; 
+
+        if (CurrentState.HasFlag(RepoState.Dirty))
+        {
+            var res = MessageBox.Show("変更が残っています。stash して切り替えますか？", "確認", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (res == MessageBoxResult.No)
+            {
+                 _isChangingBranch = true;
+                 SelectedBranch = CurrentBranch;
+                 _isChangingBranch = false;
+                 return;
+            }
+            
+            IsBusy = true;
+            await _gitService.StashAsync($"Auto-stash before checkout {value}");
+            IsBusy = false;
+        }
+
+        IsBusy = true;
+        try
+        {
+            Log($"Checkout {value}...", false);
+            var result = await _gitService.CheckoutAsync(value);
+            if (result.Success)
+            {
+                Log($"Checkout 完了: {value}", false);
+                await RefreshInternalAsync(true);
+            }
+            else
+            {
+                Log($"Checkout 失敗:\n{result.StandardError}", true);
+                _isChangingBranch = true;
+                SelectedBranch = CurrentBranch;
+                _isChangingBranch = false;
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    // Repository Management Commands
+    [RelayCommand]
+    private void CloseRepository()
+    {
+        IsRepositoryValid = false;
+        RepositoryPath = "";
+        CurrentBranch = "";
+        OnPropertyChanged(nameof(StatusMessage));
+        Changes.Clear();
+        Logs.Clear();
+    }
+
+    [RelayCommand]
+    private async Task OpenRepositoryFlowAsync()
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog();
+        dialog.Title = "リポジトリフォルダを選択";
+        if (dialog.ShowDialog() == true)
+        {
+             await OpenRepositoryAsync(dialog.FolderName);
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenRecentRepositoryAsync(string path)
+    {
+        await OpenRepositoryAsync(path);
+    }
+
+    private async Task OpenRepositoryAsync(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        
+        IsBusy = true;
+        try
+        {
+            var root = GitService.FindGitRoot(path);
+            if (root == null)
+            {
+                var res = MessageBox.Show($"\"{System.IO.Path.GetFileName(path)}\" はGitリポジトリではありません。\n初期化(git init)しますか？", "確認", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (res == MessageBoxResult.Yes)
+                {
+                    await InitRepositoryAsync(path);
+                    return;
+                }
+                IsBusy = false;
+                return;
+            }
+
+            _gitService.SetRepository(root);
+            IsRepositoryValid = true;
+            
+            // Save settings
+            _settingsService.AddRecentRepository(path);
+            LoadRecentRepositories();
+
+            await RefreshInternalAsync(false);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Open Error: " + ex.Message);
+            IsRepositoryValid = false;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void LoadRecentRepositories()
+    {
+        RecentRepositories.Clear();
+        foreach(var r in _settingsService.Settings.RecentRepositories)
+        {
+            RecentRepositories.Add(r);
+        }
+    }
+
+    private async Task InitRepositoryAsync(string path)
+    {
+         IsBusy = true;
+         try
+         {
+             var result = await _gitService.InitAsync(path);
+             if (result.Success)
+             {
+                 _gitService.SetRepository(path);
+                 IsRepositoryValid = true;
+                 _settingsService.AddRecentRepository(path);
+                 LoadRecentRepositories();
+                 
+                 await RefreshInternalAsync(true);
+                 MessageBox.Show("初期化完了", "完了");
+             }
+             else
+             {
+                 MessageBox.Show("初期化失敗:\n" + result.StandardError, "エラー");
+             }
+         }
+         catch(Exception ex)
+         {
+             MessageBox.Show("Error: " + ex.Message);
+         }
+         finally
+         {
+             IsBusy = false;
+         }
+    }
+
+    [RelayCommand]
+    private async Task CloneRepositoryFlowAsync()
+    {
+        var inputWindow = new InputWindow("リポジトリURLを入力:", "Clone Repository");
+        inputWindow.Owner = Application.Current.MainWindow;
+        if (inputWindow.ShowDialog() != true) return;
+        
+        var url = inputWindow.InputText;
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        var dialog = new Microsoft.Win32.OpenFolderDialog();
+        dialog.Title = "保存先フォルダを選択";
+        if (dialog.ShowDialog() != true) return;
+        
+        var repoName = url.TrimEnd('/').Split('/').Last().Replace(".git", "");
+        var dest = System.IO.Path.Combine(dialog.FolderName, repoName);
+        
+        if (System.IO.Directory.Exists(dest) && System.IO.Directory.GetFileSystemEntries(dest).Any())
+        {
+             if (MessageBox.Show($"\"{repoName}\" は既に存在します。続行しますか？", "確認", MessageBoxButton.YesNo) == MessageBoxResult.No) return;
+        }
+
+        IsBusy = true;
+        try 
+        {
+             Log($"Cloning {url}...", false);
+             var result = await _gitService.CloneAsync(url, dest);
+             if (result.Success)
+             {
+                 Log("Clone 完了", false);
+                 await OpenRepositoryAsync(dest);
+             }
+             else
+             {
+                 Log("Clone 失敗:\n" + result.StandardError, true);
+                 MessageBox.Show("Clone失敗", "エラー");
+             }
+        }
+        catch (Exception ex)
+        {
+             Log("Clone Error: " + ex.Message, true);
+        }
+        finally
+        {
+             IsBusy = false;
+        }
+    }
+
+    // Branch Creation Logic
+    private void CreateNewBranchFlow()
+    {
+        var inputWindow = new InputWindow("新しいブランチ名:", "ブランチ作成");
+        inputWindow.Owner = Application.Current.MainWindow;
+        if (inputWindow.ShowDialog() == true)
+        {
+            var newBranch = inputWindow.InputText;
+            if (string.IsNullOrWhiteSpace(newBranch)) return;
+            Task.Run(async () => await CreateBranchAsync(newBranch));
+        }
+    }
+
+    private async Task CreateBranchAsync(string branchName)
+    {
+         Application.Current.Dispatcher.Invoke(() => IsBusy = true);
+         try
+         {
+             Log($"Create Branch: {branchName}...", false);
+             var result = await _gitService.CreateBranchAsync(branchName);
+             if (result.Success)
+             {
+                 Log("作成完了", false);
+                 await RefreshInternalAsync(true);
+             }
+             else
+             {
+                 Log($"作成失敗:\n{result.StandardError}", true);
+                 Application.Current.Dispatcher.Invoke(() => IsBusy = false);
+             }
+         }
+         catch (Exception ex)
+         {
+             Log("Error: " + ex.Message, true);
+             Application.Current.Dispatcher.Invoke(() => IsBusy = false);
+         }
+    }
+
+    // README Viewer Properties
+    [ObservableProperty]
+    private bool _isReadmeVisible = false;
+
+    [ObservableProperty]
+    private string _readmeHtml = "";
+
+    [ObservableProperty]
+    private string _readmeButtonText = "READMEを表示";
+
+    [RelayCommand]
+    private async Task ToggleReadmeAsync()
+    {
+        if (IsReadmeVisible)
+        {
+            IsReadmeVisible = false;
+            ReadmeButtonText = "READMEを表示";
+        }
+        else
+        {
+            await LoadReadmeAsync();
+            IsReadmeVisible = true;
+            ReadmeButtonText = "Diffに戻る";
+        }
+    }
+
+    private async Task LoadReadmeAsync()
+    {
+        try
+        {
+            var repoPath = _gitService.GetInternalRepoPath();
+            var readmePath = System.IO.Path.Combine(repoPath, "README.md");
+            if (!System.IO.File.Exists(readmePath)) readmePath = System.IO.Path.Combine(repoPath, "readme.md");
+
+            if (System.IO.File.Exists(readmePath))
+            {
+                var content = await System.IO.File.ReadAllTextAsync(readmePath);
+                ReadmeHtml = ConvertMarkdownToHtml(content);
+            }
+            else
+            {
+                ReadmeHtml = "<html><body><h3>README.md not found</h3></body></html>";
+            }
+        }
+        catch (Exception ex)
+        {
+            ReadmeHtml = $"<html><body><h3>Error</h3><p>{ex.Message}</p></body></html>";
+        }
+    }
+
+    private string ConvertMarkdownToHtml(string md)
+    {
+        var html = System.Net.WebUtility.HtmlEncode(md);
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("<html><body style='font-family: sans-serif; padding: 10px;'>");
+        
+        var lines = md.Split('\n');
+        bool inCodeBlock = false;
+        
+        foreach (var originalLine in lines)
+        {
+            var line = originalLine.TrimEnd();
+            if (line.StartsWith("```"))
+            {
+                inCodeBlock = !inCodeBlock;
+                sb.AppendLine(inCodeBlock ? "<pre style='background:#f0f0f0; padding:10px;'>" : "</pre>");
+                continue;
+            }
+            if (inCodeBlock)
+            {
+                sb.AppendLine(System.Net.WebUtility.HtmlEncode(line));
+                continue;
+            }
+
+            if (line.StartsWith("# ")) sb.AppendLine($"<h1>{System.Net.WebUtility.HtmlEncode(line.Substring(2))}</h1>");
+            else if (line.StartsWith("## ")) sb.AppendLine($"<h2>{System.Net.WebUtility.HtmlEncode(line.Substring(3))}</h2>");
+            else if (line.StartsWith("- ")) sb.AppendLine($"<li>{System.Net.WebUtility.HtmlEncode(line.Substring(2))}</li>");
+            else sb.AppendLine($"{System.Net.WebUtility.HtmlEncode(line)}<br/>");
+        }
+        sb.AppendLine("</body></html>");
+        return sb.ToString();
+    }
+
     // Commands
     
     /// @brief コンストラクタ
@@ -135,12 +490,14 @@ public partial class MainViewModel : ObservableObject
     /// @param gitHubService GitHubサービス
     /// @param stateService 状態管理サービス
     /// @param toolDetector ツール検出サービス
-    public MainViewModel(GitService gitService, GitHubService gitHubService, StateService stateService, ToolDetector toolDetector)
+    /// @brief コンストラクタ
+    public MainViewModel(GitService gitService, GitHubService gitHubService, StateService stateService, ToolDetector toolDetector, SettingsService settingsService)
     {
         _gitService = gitService;
         _gitHubService = gitHubService;
         _stateService = stateService;
         _toolDetector = toolDetector;
+        _settingsService = settingsService;
     }
 
     /// @brief 状態を更新するコマンド (UIバインド用)
@@ -148,7 +505,13 @@ public partial class MainViewModel : ObservableObject
     private Task RefreshAsync() => RefreshInternalAsync(true);
 
     /// @brief 初期化 (サイレント読み込み)
-    public Task InitializeAsync() => RefreshInternalAsync(false);
+    /// @brief 初期化
+    public async Task InitializeAsync()
+    {
+        _settingsService.Load();
+        LoadRecentRepositories();
+        await RefreshInternalAsync(false);
+    }
 
     private async Task RefreshInternalAsync(bool showBusy)
     {
@@ -163,6 +526,7 @@ public partial class MainViewModel : ObservableObject
             var status = await _gitService.GetStatusAsync();
             var currentState = await _stateService.GetCurrentStateAsync();
             var changes = status.Changes;
+            var branches = await _gitService.GetLocalBranchesAsync();
             
             // UI Update
             Application.Current.Dispatcher.Invoke(() =>
@@ -173,6 +537,15 @@ public partial class MainViewModel : ObservableObject
                 
                 Changes.Clear();
                 foreach (var c in changes) Changes.Add(c);
+
+                // Branch List Update
+                Branches.Clear();
+                foreach (var b in branches) Branches.Add(b);
+                Branches.Add("[作成...]");
+                
+                _isChangingBranch = true;
+                SelectedBranch = status.Branch;
+                _isChangingBranch = false;
             });
             Log("状態更新完了: " + StatusMessage, false);
             Application.Current.Dispatcher.Invoke(NotifyCommandsCanExecuteChanged);
@@ -492,28 +865,42 @@ public partial class MainViewModel : ObservableObject
         }
 
         // 3. Create PR
-        // Simplified for MVP: ask for title/body in a prompt or use side panel inputs
-        // Assuming we use CommitMessage/Body fields or new fields? Plan says "Action Panel" inputs.
-        // Let's assume we have separate properties PRTitle, PRBody.
-        // For now, using CommitMessage as fallback or input dialog?
-        // Let's use simple InputBox logic or assuming UI has fields.
-        
         IsBusy = true;
         try
         {
-            // For MVP, just using a placeholder or assuming UI bindings exist.
-            // Let's assume we use the Commit Message box for PR details for simplicity if in "Clean" state?
-            // No, that's confusing.
-            // I'll proceed with a simple fixed title or "Last commit message" for now to satisfy build.
-            // Real app needs a dialog.
+            // Fetch default title/body from last commit
+            var lastCommitMsg = await _gitService.GetLastCommitMessageAsync();
+            var lines = lastCommitMsg.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var defaultTitle = lines.FirstOrDefault() ?? CurrentBranch; 
+            var defaultBody = lines.Length > 1 ? string.Join(Environment.NewLine, lines.Skip(1)) : "Created by Simple PR Client";
+
+            // Show Dialog (UI Thread)
+            bool? dialogResult = false;
+            string prTitle = defaultTitle;
+            string prBody = defaultBody;
             
-            var title = "Pull Request from " + CurrentBranch;
-            var body = "Created by Simple PR Client";
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                var prWindow = new PRInputWindow(defaultTitle, defaultBody);
+                prWindow.Owner = Application.Current.MainWindow; 
+                dialogResult = prWindow.ShowDialog();
+                if (dialogResult == true)
+                {
+                    prTitle = prWindow.PRTitle;
+                    prBody = prWindow.PRBody;
+                }
+            });
+
+            if (dialogResult != true)
+            {
+                IsBusy = false;
+                return;
+            }
             
             var baseBranch = await _gitHubService.GetDefaultBranchAsync();
             
             Log("PR を作成しています...", false);
-            var result = await _gitHubService.CreatePullRequestAsync(title, body, baseBranch, CurrentBranch);
+            var result = await _gitHubService.CreatePullRequestAsync(prTitle, prBody, baseBranch, CurrentBranch);
             
             if (result.Success)
             {
