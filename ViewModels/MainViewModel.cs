@@ -143,6 +143,7 @@ public partial class MainViewModel : ObservableObject
         if (value == null)
         {
             DiffText = "";
+            DiffHtml = "";
             return;
         }
 
@@ -158,11 +159,70 @@ public partial class MainViewModel : ObservableObject
             
             var result = await _gitService.GetDiffAsync(value.FilePath, tryStaged);
             DiffText = result.Success ? result.StandardOutput : "Error loading diff: " + result.StandardError;
+            DiffHtml = ConvertDiffToHtml(DiffText);
         }
         catch (Exception ex)
         {
             DiffText = "Error loading diff: " + ex.Message;
+            DiffHtml = $"<html><body><h3>Error</h3><pre>{ex.Message}</pre></body></html>";
         }
+    }
+
+    /// @brief 差分HTML
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentHtmlContent))]
+    private string _diffHtml = string.Empty;
+
+    private string ConvertDiffToHtml(string diffText)
+    {
+        if (string.IsNullOrEmpty(diffText)) return "<html><body></body></html>";
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("<!DOCTYPE html><html><head><meta charset='utf-8'><style>");
+        sb.AppendLine("body { font-family: Consolas, 'Courier New', monospace; font-size: 13px; margin: 0; padding: 5px; white-space: pre-wrap; word-wrap: break-word; }");
+        sb.AppendLine(".add { background-color: #e6ffec; color: #24292e; display: block; border-left: 4px solid #2ea44f; padding-left: 5px; }");
+        sb.AppendLine(".del { background-color: #ffebe9; color: #24292e; display: block; border-left: 4px solid #cb2431; padding-left: 5px; }");
+        sb.AppendLine(".chunk { color: #6f42c1; background-color: #f1f8ff; display: block; margin-top: 10px; padding: 5px; border-top: 1px solid #dbedff; border-bottom: 1px solid #dbedff; }");
+        sb.AppendLine(".header { color: #586069; font-weight: bold; display: block; margin-bottom: 5px; }");
+        sb.AppendLine(".meta { color: #959da5; display: block; }");
+        sb.AppendLine("div { min-height: 18px; }"); // Ensure empty lines have height
+        sb.AppendLine("</style></head><body>");
+
+        var lines = diffText.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
+        foreach (var originalLine in lines)
+        {
+            // Empty string fix for split
+            var line = originalLine; 
+            var encoded = System.Net.WebUtility.HtmlEncode(line);
+            
+            if (line.StartsWith("diff --git") || line.StartsWith("index ") || line.StartsWith("new file") || line.StartsWith("deleted file") || line.StartsWith("similarity index"))
+            {
+                sb.AppendLine($"<div class='header'>{encoded}</div>");
+            }
+            else if (line.StartsWith("---") || line.StartsWith("+++"))
+            {
+                sb.AppendLine($"<div class='meta'>{encoded}</div>");
+            }
+            else if (line.StartsWith("@@"))
+            {
+                 sb.AppendLine($"<div class='chunk'>{encoded}</div>");
+            }
+            else if (line.StartsWith("+"))
+            {
+                 sb.AppendLine($"<div class='add'>{encoded}</div>");
+            }
+            else if (line.StartsWith("-"))
+            {
+                 sb.AppendLine($"<div class='del'>{encoded}</div>");
+            }
+            else
+            {
+                 // Creating a div for normal lines ensures alignment
+                 sb.AppendLine($"<div>{encoded}</div>");
+            }
+        }
+        sb.AppendLine("</body></html>");
+        return sb.ToString();
     }
 
     /// @brief 変更ファイルリスト
@@ -494,10 +554,14 @@ public partial class MainViewModel : ObservableObject
 
     // README Viewer Properties
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentHtmlContent))]
     private bool _isReadmeVisible = false;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentHtmlContent))]
     private string _readmeHtml = "";
+
+    public string CurrentHtmlContent => IsReadmeVisible ? ReadmeHtml : DiffHtml;
 
     [ObservableProperty]
     private string _readmeButtonText = "READMEを表示";

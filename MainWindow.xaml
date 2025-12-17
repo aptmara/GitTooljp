@@ -136,12 +136,8 @@
                             HorizontalAlignment="Right" Padding="10,2"/>
                 </Grid>
                 <Grid>
-                    <TextBox Text="{Binding DiffText, Mode=OneWay}" IsReadOnly="True" 
-                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                             FontFamily="Consolas"/>
-                     <!-- README Viewer Overlay -->
-                    <WebBrowser Visibility="{Binding IsReadmeVisible, Converter={StaticResource BoolToVis}}"
-                                helpers:BrowserBehavior.Html="{Binding ReadmeHtml}"/>
+                    <WebBrowser helpers:BrowserBehavior.Html="{Binding CurrentHtmlContent}"
+                                Visibility="{Binding IsRepositoryValid, Converter={StaticResource BoolToVis}}"/>
                 </Grid>
             </DockPanel>
 
