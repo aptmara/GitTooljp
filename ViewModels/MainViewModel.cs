@@ -13,6 +13,8 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 
+using System.Diagnostics;
+
 /// @brief メイン画面のViewModel
 /// 作成者: 山内陽
 public partial class MainViewModel : ObservableObject
@@ -118,12 +120,8 @@ public partial class MainViewModel : ObservableObject
             // If checking an unstaged file, unstaged diff.
             // But FileChangeEntry has both statuses.
             // For simplicity, prioritize Unstaged diff if M, else Staged.
-            // Or maybe separate UI for staged/unstaged diff?
-            // Plan said: "Diff View (Simple text diff)".
-            // Let's check Unstaged first.
             
             bool tryStaged = value.IsStaged && !value.WorkTreeStatus.Equals('M');
-            // Logic: if it has worktree changes, show them. If only staged, show staged.
             
             var result = await _gitService.GetDiffAsync(value.FilePath, tryStaged);
             DiffText = result.Success ? result.StandardOutput : "Error loading diff: " + result.StandardError;
@@ -236,7 +234,7 @@ public partial class MainViewModel : ObservableObject
 
     private async Task OpenRepositoryAsync(string path)
     {
-        if (string.IsNullOrEmpty(path)) return;
+        if (string.IsNullOrEmpty(path)) return; 
         
         IsBusy = true;
         try
@@ -319,14 +317,14 @@ public partial class MainViewModel : ObservableObject
     {
         var inputWindow = new InputWindow("リポジトリURLを入力:", "Clone Repository");
         inputWindow.Owner = Application.Current.MainWindow;
-        if (inputWindow.ShowDialog() != true) return;
+        if (inputWindow.ShowDialog() != true) return; 
         
         var url = inputWindow.InputText;
         if (string.IsNullOrWhiteSpace(url)) return;
 
         var dialog = new Microsoft.Win32.OpenFolderDialog();
         dialog.Title = "保存先フォルダを選択";
-        if (dialog.ShowDialog() != true) return;
+        if (dialog.ShowDialog() != true) return; 
         
         var repoName = url.TrimEnd('/').Split('/').Last().Replace(".git", "");
         var dest = System.IO.Path.Combine(dialog.FolderName, repoName);
@@ -486,11 +484,6 @@ public partial class MainViewModel : ObservableObject
     // Commands
     
     /// @brief コンストラクタ
-    /// @param gitService Gitサービス
-    /// @param gitHubService GitHubサービス
-    /// @param stateService 状態管理サービス
-    /// @param toolDetector ツール検出サービス
-    /// @brief コンストラクタ
     public MainViewModel(GitService gitService, GitHubService gitHubService, StateService stateService, ToolDetector toolDetector, SettingsService settingsService)
     {
         _gitService = gitService;
@@ -504,13 +497,45 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(IsNotBusy))]
     private Task RefreshAsync() => RefreshInternalAsync(true);
 
-    /// @brief 初期化 (サイレント読み込み)
     /// @brief 初期化
     public async Task InitializeAsync()
     {
+        // 1. Dependency Check
+        await CheckDependenciesAsync();
+        
+        // 2. Load
         _settingsService.Load();
         LoadRecentRepositories();
         await RefreshInternalAsync(false);
+    }
+    
+    private async Task CheckDependenciesAsync()
+    {
+        try
+        {
+            // Check Git
+            using var gitProc = new Process();
+            gitProc.StartInfo = new ProcessStartInfo("git", "--version") { UseShellExecute = false, CreateNoWindow = true };
+            gitProc.Start();
+            await gitProc.WaitForExitAsync();
+            if (gitProc.ExitCode != 0) 
+            {
+                MessageBox.Show("Git が正しくインストールされていないか、PATHに通っていません。\nGitをインストールしてください。", "致命的エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            // Check gh
+            using var ghProc = new Process();
+            ghProc.StartInfo = new ProcessStartInfo("gh", "--version") { UseShellExecute = false, CreateNoWindow = true };
+            ghProc.Start();
+            await ghProc.WaitForExitAsync();
+             if (ghProc.ExitCode != 0) 
+            {
+                // Just log header? Or flag?
+            }
+        }
+        catch
+        {
+             // Ignore for now or handle gracefully
+        }
     }
 
     private async Task RefreshInternalAsync(bool showBusy)
@@ -579,17 +604,7 @@ public partial class MainViewModel : ObservableObject
             var res = MessageBox.Show("ステージされているファイルがありません。\nすべての変更をステージしてコミットしますか？", "確認", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (res == MessageBoxResult.Yes)
             {
-                // Stage All (Awaitable but we need to utilize the one that tracks pending ops)
-                // However, Commit wants to proceed immediately.
-                // If we use fire-and-forget StageAll, we can't wait properly?
-                // Actually StageFilesInternalAsync above awaits completion of the background task.
-                // So we can await it.
                 await StageAllInternalAsync();
-                
-                // Re-check? Or just assume success.
-                // The StageAllInternalAsync releases lock before returning?
-                // Yes, WaitAsync / Release.
-                // So we can proceed to Commit logic which acquires lock again.
             }
             else
             {
@@ -640,7 +655,7 @@ public partial class MainViewModel : ObservableObject
     /// @return 成功したかどうか
     private async Task StageFilesInternalAsync(List<string> paths)
     {
-        if (!paths.Any()) return;
+        if (!paths.Any()) return; 
 
         // Optimistic Update (UI Thread)
         Application.Current.Dispatcher.Invoke(() => 
@@ -696,12 +711,6 @@ public partial class MainViewModel : ObservableObject
         try
         {
             Log("Push を実行します...", false);
-            // Upstream check is done inside State service but we might need to handle NoUpstream specifically here logic-wise
-            // But State-driven UI implies we just call Push or PushSetUpstream.
-            
-            // However, the plan says "RepoState" determines flags.
-            // If NoUpstream, we should ask user or just do set-upstream.
-            // Let's check state.
             
             var result = CurrentState.HasFlag(RepoState.NoUpstream) 
                 ? await _gitService.PushAsync(CurrentBranch, true)
@@ -753,8 +762,6 @@ public partial class MainViewModel : ObservableObject
             if (res == MessageBoxResult.Cancel) return;
             if (res == MessageBoxResult.Yes)
             {
-                // User chose to commit first. Focus commit box (ideally).
-                // Here we just abort pull so user can commit.
                 MessageBox.Show("Commit を実行してから再度 Pull してください。", "案内");
                 return;
             }
@@ -772,7 +779,6 @@ public partial class MainViewModel : ObservableObject
                         return;
                     }
                     Log("Stash 完了", false);
-                    // Proceed to pull
                 }
                 catch (Exception ex)
                 {
@@ -796,7 +802,6 @@ public partial class MainViewModel : ObservableObject
             else
             {
                 Log("Pull 失敗 (Conflict 発生の可能性):\n" + result.StandardError, true);
-                // Refresh to update state to Rebase if conflict happened
                 await RefreshInternalAsync(true);
                 
                 if (CurrentState.HasFlag(RepoState.Rebase))
@@ -821,10 +826,9 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanCreatePR))]
     private async Task CreatePRAsync()
     {
-        // 1. Auth Check - already in State but double check logic flow
+        // 1. Auth Check
         if (CurrentState.HasFlag(RepoState.AuthNg))
         {
-             // Prompt login
              var loginRes = MessageBox.Show("gh の認証が必要です。ログインしますか？\n(ブラウザが開きます)", "認証の確認", MessageBoxButton.YesNo);
              if (loginRes == MessageBoxResult.Yes)
              {
@@ -832,7 +836,6 @@ public partial class MainViewModel : ObservableObject
                  await _gitHubService.RunAuthLoginAsync();
                  await RefreshAsync();
                  IsBusy = false;
-                 // Retry PR? User can click again.
              }
              return;
         }
@@ -840,11 +843,9 @@ public partial class MainViewModel : ObservableObject
         // 2. Logic: Upstream/Unpushed -> Push first
         if (CurrentState.HasFlag(RepoState.NoUpstream) || CurrentState.HasFlag(RepoState.Unpushed))
         {
-             // Confirm push
              var pushRes = MessageBox.Show("PR作成の前に Push が必要です。\nPush して続行しますか？", "Push の確認", MessageBoxButton.YesNo);
              if (pushRes == MessageBoxResult.No) return;
 
-             // reuse Push logic?
              IsBusy = true;
              try
              {
@@ -858,9 +859,6 @@ public partial class MainViewModel : ObservableObject
                     IsBusy = false;
                     return;
                 }
-                // Refresh state to ensure Clean/Synced
-                // BUT we don't want to clear IsBusy yet
-                // Manually refresh state logic or just proceed assuming success
              }
              catch
              {
@@ -873,13 +871,11 @@ public partial class MainViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            // Fetch default title/body from last commit
             var lastCommitMsg = await _gitService.GetLastCommitMessageAsync();
             var lines = lastCommitMsg.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
             var defaultTitle = lines.FirstOrDefault() ?? CurrentBranch; 
             var defaultBody = lines.Length > 1 ? string.Join(Environment.NewLine, lines.Skip(1)) : "Created by Simple PR Client";
 
-            // Show Dialog (UI Thread)
             bool? dialogResult = false;
             string prTitle = defaultTitle;
             string prBody = defaultBody;
@@ -910,19 +906,57 @@ public partial class MainViewModel : ObservableObject
             if (result.Success)
             {
                 Log("Pull Request 作成完了:\n" + result.StandardOutput, false);
-                var url = result.StandardOutput.Trim(); // gh usually outputs URL
+                var url = result.StandardOutput.Trim(); 
                 if (url.StartsWith("https://"))
                 {
                      var open = MessageBox.Show($"PRを作成しました。\n{url}\n\nGitHubで開きますか？", "成功", MessageBoxButton.YesNo);
                      if (open == MessageBoxResult.Yes)
                      {
-                         _toolDetector.OpenFileInDefaultEditor(url); // Opens URL
+                         _toolDetector.OpenFileInDefaultEditor(url); 
                      }
                 }
             }
             else
             {
-                Log("PR 作成失敗:\n" + result.StandardError, true);
+                var error = result.StandardError;
+                Log("PR 作成失敗:\n" + error, true);
+                
+                if (error.Contains("GraphQL: Resource not accessible by personal access token") || 
+                    error.Contains("scope"))
+                {
+                    var res = MessageBox.Show(
+                        "GitHubの権限不足によりPRを作成できませんでした。\n" +
+                        "これは `repo` スコープが不足している場合に発生します。\n\n" +
+                        "今すぐ認証を更新(Refresh)しますか？\n" +
+                        "([はい]を押すと黒い画面が開きます)\n\n" +
+                        "【操作手順】\n" +
+                        "1. 黒い画面で英語の質問が出ます\n" +
+                        "   'Authenticate Git with your GitHub credentials? (Y/n)'\n" +
+                        "2. キーボードで「Y」と入力し、Enterキーを押してください\n" +
+                        "3. ブラウザが開くので、認証(Authorize)ボタンを押してください",
+                        "権限エラーと修正", 
+                        MessageBoxButton.YesNo, 
+                        MessageBoxImage.Information); 
+                        
+                    if (res == MessageBoxResult.Yes)
+                    {
+                        IsBusy = true;
+                        try 
+                        {
+                            Log("認証更新を実行中 (黒い画面に従ってください)...", false);
+                            var authRes = await _gitHubService.RefreshAuthAsync();
+                            if (authRes.Success)
+                            {
+                                MessageBox.Show("認証更新が完了しました。\n再度 PR 作成を試してください。", "成功");
+                            }
+                            else
+                            {
+                                Log("認証更新失敗 (画面が閉じられたかエラー): " + authRes.ExitCode, true);
+                            }
+                        }
+                        finally { IsBusy = false; }
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -975,7 +1009,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenVS()
     {
-        if (string.IsNullOrEmpty(RepositoryPath)) return;
+        if (string.IsNullOrEmpty(RepositoryPath)) return; 
         
         bool success = _toolDetector.OpenInVisualStudio(RepositoryPath);
         if (!success)
@@ -1040,7 +1074,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ToggleStage(FileChangeEntry? entry)
     {
-        if (entry == null) return;
+        if (entry == null) return; 
         
         // Optimistic Update (Flip local state)
         // Entry is ObservableObject, so UI updates instantly.
@@ -1068,9 +1102,6 @@ public partial class MainViewModel : ObservableObject
                 if (!result.Success)
                 {
                     Log($"Staging操作失敗: {result.StandardError}", true);
-                    // Revert optimistic update on failure?
-                    // Entry might have changed again. Complex.
-                    // Ideally yes, but for MVP just log error.
                 }
             }
             finally

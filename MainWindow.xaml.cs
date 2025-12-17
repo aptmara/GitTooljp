@@ -1,10 +1,11 @@
-﻿namespace SimplePRClient;
+namespace SimplePRClient;
 
 using System;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Controls;
 using SimplePRClient.Services;
 using SimplePRClient.ViewModels;
 
@@ -62,6 +63,41 @@ public partial class MainWindow : Window
                  if (vm.OpenRecentRepositoryCommand.CanExecute(path))
                     vm.OpenRecentRepositoryCommand.Execute(path);
              }
+        }
+    }
+
+    // click copy
+    private void LogListBox_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var item = ItemsControl.ContainerFromElement((ListBox)sender, e.OriginalSource as DependencyObject) as ListBoxItem;
+        if (item != null)
+        {
+            // Copy content
+            var text = item.Content?.ToString();
+            if (!string.IsNullOrEmpty(text))
+            {
+                Clipboard.SetText(text);
+            }
+        }
+    }
+
+    // Ctrl+C copy
+    private void LogListBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.C && (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control)
+        {
+            var listBox = sender as System.Windows.Controls.ListBox;
+            if (listBox != null && listBox.SelectedItems.Count > 0)
+            {
+                var sb = new System.Text.StringBuilder();
+                foreach (var item in listBox.SelectedItems)
+                {
+                    sb.AppendLine(item.ToString());
+                }
+                Clipboard.SetText(sb.ToString().TrimEnd());
+                // Mark handled to prevent default beep if any
+                e.Handled = true;
+            }
         }
     }
 }
