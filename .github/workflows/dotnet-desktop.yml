@@ -21,7 +21,7 @@ jobs:
         run: dotnet restore ./SimplePRClient.csproj -r win-x64
 
       - name: Publish
-        run: dotnet publish ./SimplePRClient.csproj -c Release -r win-x64 --self-contained true -o ./publish --no-build
+        run: dotnet publish ./SimplePRClient.csproj -c Release -r win-x64 --self-contained true -o ./publish
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
