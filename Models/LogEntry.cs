@@ -1,22 +1,21 @@
 namespace SimplePRClient.Models;
 
-/// <summary>
-/// ログエントリを表すモデル
-/// </summary>
+/// @brief ログエントリを表すモデル
+/// 作成者: 山内陽
 public class LogEntry
 {
-    /// <summary>
-    /// タイムスタンプ
-    /// </summary>
+    /// @brief タイムスタンプ
     public DateTime Timestamp { get; set; } = DateTime.Now;
 
-    /// <summary>
-    /// ログメッセージ
-    /// </summary>
+    /// @brief ログメッセージ
     public string Message { get; set; } = string.Empty;
 
-    /// <summary>
-    /// エラーかどうか
-    /// </summary>
+    /// @brief エラーかどうか
     public bool IsError { get; set; }
+
+    /// @brief 文字列変換 (コピー用)
+    public override string ToString()
+    {
+        return $"[{Timestamp:HH:mm:ss}] {(IsError ? "[ERROR] " : "")}{Message}";
+    }
 }

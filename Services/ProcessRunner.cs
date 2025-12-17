@@ -1,115 +1,80 @@
 namespace SimplePRClient.Services;
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-/// <summary>
-/// 外部プロセス実行結果
-/// </summary>
-public class ProcessResult
-{
-    public int ExitCode { get; set; }
-    public string StandardOutput { get; set; } = string.Empty;
-    public string StandardError { get; set; } = string.Empty;
-    public bool Success => ExitCode == 0;
-}
+/// @brief 外部プロセス実行結果
+/// 作成者: 山内陽
+public record ProcessResult(bool Success, string StandardOutput, string StandardError, int ExitCode);
 
-/// <summary>
-/// 外部CLI実行のラッパーサービス
-/// </summary>
+/// @brief 外部プロセス実行ランナー
+/// 作成者: 山内陽
 public class ProcessRunner
 {
-    /// <summary>
-    /// シークレット情報をマスクするための正規表現パターン
-    /// </summary>
-    private static readonly Regex[] MaskPatterns = new[]
+    // ログ出力用イベントなどが必要であればここに追加
+
+    /// @brief コマンドを非同期で実行する
+    /// @param fileName 実行ファイル名 (git, gh 等)
+    /// @param arguments 引数
+    /// @param workingDirectory 作業ディレクトリ
+    /// @param ct キャンセルトークン
+    /// @return 実行結果
+    public async Task<ProcessResult> RunAsync(string fileName, string arguments, string workingDirectory = "", CancellationToken ct = default)
     {
-        new Regex(@"ghp_[a-zA-Z0-9]{36}", RegexOptions.Compiled),
-        new Regex(@"github_pat_[a-zA-Z0-9_]{22,}", RegexOptions.Compiled),
-        new Regex(@"Authorization:\s*.+", RegexOptions.Compiled | RegexOptions.IgnoreCase),
-        new Regex(@"https://[^:]+:[^@]+@", RegexOptions.Compiled),
-    };
-
-    public event Action<string, bool>? OnOutput;
-
-    /// <summary>
-    /// コマンドを非同期で実行
-    /// </summary>
-    public async Task<ProcessResult> RunAsync(
-        string fileName,
-        string arguments,
-        string? workingDirectory = null,
-        CancellationToken cancellationToken = default)
-    {
-        var maskedArgs = MaskSecrets(arguments);
-        OnOutput?.Invoke($"> {fileName} {maskedArgs}", false);
-
         var psi = new ProcessStartInfo
         {
             FileName = fileName,
             Arguments = arguments,
-            WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory,
+            WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
+            StandardOutputEncoding = Encoding.UTF8, // git/gh は通常 UTF8
+            StandardErrorEncoding = Encoding.UTF8
         };
+
+        // 環境変数の調整が必要ならここで行う (例: LANG=en_US.UTF-8)
+        psi.EnvironmentVariables["LANG"] = "en_US.UTF-8"; // 英語出力を強制する場合
 
         using var process = new Process { StartInfo = psi };
-        var stdout = new StringBuilder();
-        var stderr = new StringBuilder();
+        
+        var stdoutBuilder = new StringBuilder();
+        var stderrBuilder = new StringBuilder();
 
-        process.OutputDataReceived += (_, e) =>
+        process.OutputDataReceived += (s, e) => { if (e.Data != null) stdoutBuilder.AppendLine(e.Data); };
+        process.ErrorDataReceived += (s, e) => { if (e.Data != null) stderrBuilder.AppendLine(e.Data); };
+
+        try
         {
-            if (e.Data != null)
-            {
-                var masked = MaskSecrets(e.Data);
-                stdout.AppendLine(masked);
-                OnOutput?.Invoke(masked, false);
-            }
-        };
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
 
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data != null)
-            {
-                var masked = MaskSecrets(e.Data);
-                stderr.AppendLine(masked);
-                OnOutput?.Invoke(masked, true);
-            }
-        };
+            await process.WaitForExitAsync(ct);
 
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        await process.WaitForExitAsync(cancellationToken);
-
-        OnOutput?.Invoke($"Exit code: {process.ExitCode}", process.ExitCode != 0);
-
-        return new ProcessResult
-        {
-            ExitCode = process.ExitCode,
-            StandardOutput = stdout.ToString(),
-            StandardError = stderr.ToString(),
-        };
-    }
-
-    /// <summary>
-    /// シークレット情報をマスク
-    /// </summary>
-    private static string MaskSecrets(string input)
-    {
-        foreach (var pattern in MaskPatterns)
-        {
-            input = pattern.Replace(input, "[MASKED]");
+            return new ProcessResult(
+                process.ExitCode == 0,
+                stdoutBuilder.ToString(),
+                stderrBuilder.ToString(),
+                process.ExitCode
+            );
         }
-        return input;
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill();
+            }
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new ProcessResult(false, string.Empty, ex.Message, -1);
+        }
     }
 }

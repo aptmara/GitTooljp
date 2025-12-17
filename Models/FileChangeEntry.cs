@@ -1,32 +1,21 @@
 namespace SimplePRClient.Models;
 
-/// <summary>
-/// git status --porcelain の結果を保持するモデル
-/// </summary>
+/// @brief git status --porcelain の結果を保持するモデル
+/// 作成者: 山内陽
 public class FileChangeEntry
 {
-    /// <summary>
-    /// ファイルの相対パス
-    /// </summary>
+    /// @brief ファイルの相対パス
     public string FilePath { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Index (Staged) の状態 (M/A/D/R/C/U/?)
-    /// </summary>
+    /// @brief Index (Staged) の状態 (M/A/D/R/C/U/?)
     public char IndexStatus { get; set; }
 
-    /// <summary>
-    /// WorkTree (Unstaged) の状態 (M/A/D/R/C/U/?)
-    /// </summary>
+    /// @brief WorkTree (Unstaged) の状態 (M/A/D/R/C/U/?)
     public char WorkTreeStatus { get; set; }
 
-    /// <summary>
-    /// Staged 状態かどうか
-    /// </summary>
+    /// @brief Staged 状態かどうか
     public bool IsStaged => IndexStatus != ' ' && IndexStatus != '?';
 
-    /// <summary>
-    /// Conflict 状態かどうか (Unmerged)
-    /// </summary>
+    /// @brief Conflict 状態かどうか (Unmerged)
     public bool IsConflict => IndexStatus == 'U' || WorkTreeStatus == 'U';
 }

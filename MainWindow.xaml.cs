@@ -1,23 +1,73 @@
-﻿using System.Text;
+﻿namespace SimplePRClient;
+
+using System;
+using System.Globalization;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+using SimplePRClient.Services;
+using SimplePRClient.ViewModels;
 
-namespace SimplePRClient;
-
-/// <summary>
-/// Interaction logic for MainWindow.xaml
-/// </summary>
+/// @brief メインウィンドウの相互作用ロジック
+/// 作成者: 山内陽
 public partial class MainWindow : Window
 {
     public MainWindow()
     {
         InitializeComponent();
+
+        // Simple DI setup for MVP
+        var runner = new ProcessRunner();
+        var gitService = new GitService(runner);
+        
+        // Find git root automatically from current dir if possible, or simple default
+        // The plan says "Start from current dir", assuming user launches app from repo or selects it.
+        // For now, let's use Environment.CurrentDirectory
+        var root = GitService.FindGitRoot(Environment.CurrentDirectory);
+        if (root != null)
+        {
+             gitService.SetRepository(root);
+        }
+        else
+        {
+             // If not found, one might want to prompt folder selection. 
+             // For build-check MVP, we leave it empty or user sets it via logic (not implemented yet).
+             // StateService will return flags indicating issues.
+        }
+
+        var gitHubService = new GitHubService(runner);
+        if (root != null) gitHubService.SetRepository(root);
+
+        var stateService = new StateService(gitService, gitHubService);
+        var toolDetector = new ToolDetector();
+
+        var viewModel = new MainViewModel(gitService, gitHubService, stateService, toolDetector);
+        
+        // Initial Refresh
+        Loaded += async (s, e) => 
+        {
+             // Manually trigger RefreshCommand if possible or call method
+             // Command execution is async void usually in UI events
+             if (viewModel.RefreshCommand.CanExecute(null))
+                 viewModel.RefreshCommand.Execute(null);
+        };
+
+        DataContext = viewModel;
+    }
+}
+
+public class BoolToColorConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        // IsError (true) -> Red, else Black
+        if (value is bool isError && isError)
+            return Brushes.Red;
+        return Brushes.Black;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
     }
 }

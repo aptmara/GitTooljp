@@ -2,41 +2,28 @@ namespace SimplePRClient.Models;
 
 using System;
 
-/// <summary>
-/// リポジトリの状態を表すフラグ列挙型。
+/// @brief リポジトリの状態を表すフラグ列挙型。
 /// 複数の状態が同時に成立する場合がある (例: Dirty | NoUpstream)。
 /// Clean (=0) は「他のフラグが一切立っていない」状態を示す。
-/// </summary>
+/// 作成者: 山内陽
 [Flags]
 public enum RepoState
 {
-    /// <summary>
-    /// 変更なし。UI表示上の "Clean" は (state == 0) で判定する。
-    /// </summary>
+    /// @brief 変更なし。UI表示上の "Clean" は (state == 0) で判定する。
     Clean = 0,
 
-    /// <summary>
-    /// Commit されていない変更あり (Staged または Unstaged)
-    /// </summary>
+    /// @brief Commit されていない変更あり (Staged または Unstaged)
     Dirty = 1 << 0,
 
-    /// <summary>
-    /// Push されていない Commit あり (Upstream がある場合のみ判定)
-    /// </summary>
+    /// @brief Push されていない Commit あり (Upstream がある場合のみ判定)
     Unpushed = 1 << 1,
 
-    /// <summary>
-    /// Upstream (追跡ブランチ) が未設定
-    /// </summary>
+    /// @brief Upstream (追跡ブランチ) が未設定
     NoUpstream = 1 << 2,
 
-    /// <summary>
-    /// Rebase 進行中 (Conflict を含む可能性あり)
-    /// </summary>
+    /// @brief Rebase 進行中 (Conflict を含む可能性あり)
     Rebase = 1 << 3,
 
-    /// <summary>
-    /// GitHub CLI (gh) の認証が必要
-    /// </summary>
+    /// @brief GitHub CLI (gh) の認証が必要
     AuthNg = 1 << 4,
 }

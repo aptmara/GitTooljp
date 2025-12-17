@@ -4,12 +4,12 @@ using SimplePRClient.Models;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-/// <summary>
-/// Git CLI ラッパーサービス
-/// </summary>
+/// @brief Git操作を提供するサービスクラス
+/// 作成者: 山内陽
 public class GitService
 {
     private readonly ProcessRunner _runner;
@@ -20,198 +20,184 @@ public class GitService
         _runner = runner;
     }
 
-    /// <summary>
-    /// リポジトリのパスを設定
-    /// </summary>
     public void SetRepository(string path)
     {
         _repoPath = path;
     }
 
-    /// <summary>
-    /// 現在のリポジトリパス
-    /// </summary>
-    public string RepositoryPath => _repoPath;
+    public string CurrentRepositoryPath => _repoPath;
 
-    /// <summary>
-    /// 現在のブランチ名を取得
-    /// </summary>
-    public async Task<string> GetCurrentBranchAsync(CancellationToken ct = default)
+    /// @brief 現在のディレクトリから上位に .git を探す
+    /// @param startPath 探索開始ディレクトリのパス
+    /// @return .git のあるルートディレクトリパス。見つからない場合は null
+    public static string? FindGitRoot(string startPath)
     {
-        var result = await RunGitAsync("rev-parse --abbrev-ref HEAD", ct);
-        return result.Success ? result.StandardOutput.Trim() : string.Empty;
-    }
-
-    /// <summary>
-    /// リポジトリの状態を取得 (Flags)
-    /// </summary>
-    public async Task<RepoState> GetRepoStateAsync(CancellationToken ct = default)
-    {
-        var state = RepoState.Clean;
-
-        // Rebase 検知
-        if (IsRebaseInProgress())
+        var dir = new DirectoryInfo(startPath);
+        while (dir != null)
         {
-            state |= RepoState.Rebase;
-        }
-
-        // Dirty 検知 (Staged/Unstaged/Untracked)
-        var statusResult = await RunGitAsync("status --porcelain", ct);
-        if (statusResult.Success && !string.IsNullOrWhiteSpace(statusResult.StandardOutput))
-        {
-            state |= RepoState.Dirty;
-        }
-
-        // Upstream 検知
-        var upstreamResult = await RunGitAsync("rev-parse --abbrev-ref --symbolic-full-name @{u}", ct);
-        if (!upstreamResult.Success)
-        {
-            state |= RepoState.NoUpstream;
-        }
-        else
-        {
-            // Unpushed 検知 (Upstream がある場合のみ)
-            var countResult = await RunGitAsync("rev-list --count @{u}..HEAD", ct);
-            if (countResult.Success && int.TryParse(countResult.StandardOutput.Trim(), out var count) && count > 0)
+            if (Directory.Exists(Path.Combine(dir.FullName, ".git")))
             {
-                state |= RepoState.Unpushed;
+                return dir.FullName;
             }
+            dir = dir.Parent;
         }
-
-        return state;
+        return null;
     }
 
-    /// <summary>
-    /// ファイル変更一覧を取得
-    /// </summary>
-    public async Task<List<FileChangeEntry>> GetFileChangesAsync(CancellationToken ct = default)
+    /// @brief git status --porcelain=v1 -b を実行し、ファイル変更一覧とブランチ情報を取得する
+    /// @param ct キャンセルトークン
+    /// @return 変更リスト、ブランチ名、Upstream名、Dirtyフラグのタプル
+    public async Task<(List<FileChangeEntry> Changes, string Branch, string Upstream, bool IsDirty)> GetStatusAsync(CancellationToken ct = default)
     {
-        var result = await RunGitAsync("status --porcelain", ct);
-        var entries = new List<FileChangeEntry>();
+        var result = await _runner.RunAsync("git", "status --porcelain=v1 -b", _repoPath, ct);
+        
+        var changes = new List<FileChangeEntry>();
+        string branch = "HEAD";
+        string upstream = "";
+        bool isDirty = false;
 
-        if (!result.Success) return entries;
+        if (!result.Success) return (changes, branch, upstream, isDirty);
 
-        foreach (var line in result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        var lines = result.StandardOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var line in lines)
         {
             if (line.Length < 3) continue;
 
-            entries.Add(new FileChangeEntry
+            if (line.StartsWith("##"))
             {
-                IndexStatus = line[0],
-                WorkTreeStatus = line[1],
-                FilePath = line.Substring(3).Trim(),
+                // Branch info: ## main...origin/main
+                var branchInfo = line.Substring(3).Trim();
+                var parts = branchInfo.Split(new[] { "..." }, StringSplitOptions.None);
+                branch = parts[0];
+                if (parts.Length > 1)
+                {
+                    upstream = parts[1].Split(' ')[0]; // remove ahead/behind info if any
+                }
+                continue;
+            }
+
+            char indexStatus = line[0];
+            char workTreeStatus = line[1];
+            string path = line.Substring(3).Trim();
+
+            // Ignore rename info for now, simple path extraction
+            if (path.Contains(" -> "))
+            {
+                path = path.Split(new[] { " -> " }, StringSplitOptions.None)[1];
+            }
+
+            // Remove quotes if present
+            path = path.Trim('"');
+
+            changes.Add(new FileChangeEntry
+            {
+                FilePath = path,
+                IndexStatus = indexStatus,
+                WorkTreeStatus = workTreeStatus
             });
+
+            if (indexStatus != '?' && indexStatus != ' ') isDirty = true; // Staged changes
+            if (workTreeStatus != '?' && workTreeStatus != ' ') isDirty = true; // Unstaged changes (tracked files)
+            // Untracked files (??) might not be considered "Dirty" for commit purposes unless added, 
+            // but for "Working directory clean" they are relevant. 
+            // The spec definition of DIRTY is "commitされていない変更あり".
         }
 
-        return entries;
+        return (changes, branch, upstream, isDirty);
     }
 
-    /// <summary>
-    /// Rebase 進行中かどうか
-    /// </summary>
-    public bool IsRebaseInProgress()
+    public async Task<bool> IsRebaseInProgressAsync()
     {
         if (string.IsNullOrEmpty(_repoPath)) return false;
-
         var gitDir = Path.Combine(_repoPath, ".git");
-        return Directory.Exists(Path.Combine(gitDir, "rebase-apply")) ||
-               Directory.Exists(Path.Combine(gitDir, "rebase-merge"));
+        return Directory.Exists(Path.Combine(gitDir, "rebase-merge")) || 
+               Directory.Exists(Path.Combine(gitDir, "rebase-apply"));
     }
 
-    /// <summary>
-    /// ファイルを Stage
-    /// </summary>
+    public async Task<List<string>> GetConflictedFilesAsync(CancellationToken ct = default)
+    {
+        var result = await _runner.RunAsync("git", "diff --name-only --diff-filter=U", _repoPath, ct);
+        if (!result.Success) return new List<string>();
+        return result.StandardOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+    }
+
     public async Task<ProcessResult> StageFileAsync(string filePath, CancellationToken ct = default)
     {
-        return await RunGitAsync($"add \"{filePath}\"", ct);
+        return await _runner.RunAsync("git", $"add \"{filePath}\"", _repoPath, ct);
     }
 
-    /// <summary>
-    /// ファイルを Unstage
-    /// </summary>
     public async Task<ProcessResult> UnstageFileAsync(string filePath, CancellationToken ct = default)
     {
-        return await RunGitAsync($"restore --staged \"{filePath}\"", ct);
+        return await _runner.RunAsync("git", $"restore --staged \"{filePath}\"", _repoPath, ct);
     }
 
-    /// <summary>
-    /// Commit を実行
-    /// </summary>
-    public async Task<ProcessResult> CommitAsync(string message, string? body = null, CancellationToken ct = default)
+    public async Task<ProcessResult> CommitAsync(string message, string body, CancellationToken ct = default)
     {
-        var args = $"commit -m \"{EscapeMessage(message)}\"";
-        if (!string.IsNullOrWhiteSpace(body))
+        // git commit -m "title" -m "body"
+        // Argument escaping is critical here. Using a simpler approach for now.
+        // For production, consider using a temporary file for the message if it contains complex chars.
+        
+        // Simple escaping for CLI (basic quotes handling)
+        var msgArg = EscapeArg(message);
+        var bodyArg = string.IsNullOrEmpty(body) ? "" : $"-m \"{EscapeArg(body)}\"" ;
+
+        return await _runner.RunAsync("git", $"commit -m \"{msgArg}\" {bodyArg}", _repoPath, ct);
+    }
+
+    public async Task<ProcessResult> PushAsync(string branch, bool setUpstream = false, CancellationToken ct = default)
+    {
+        var args = "push";
+        if (setUpstream)
         {
-            args += $" -m \"{EscapeMessage(body)}\"";
+            args += $" --set-upstream origin {branch}";
         }
-        return await RunGitAsync(args, ct);
+        return await _runner.RunAsync("git", args, _repoPath, ct);
     }
 
-    /// <summary>
-    /// Push を実行
-    /// </summary>
-    public async Task<ProcessResult> PushAsync(CancellationToken ct = default)
-    {
-        return await RunGitAsync("push", ct);
-    }
-
-    /// <summary>
-    /// Push (--set-upstream) を実行
-    /// </summary>
-    public async Task<ProcessResult> PushSetUpstreamAsync(string branch, CancellationToken ct = default)
-    {
-        return await RunGitAsync($"push --set-upstream origin {branch}", ct);
-    }
-
-    /// <summary>
-    /// Pull --rebase を実行
-    /// </summary>
     public async Task<ProcessResult> PullRebaseAsync(CancellationToken ct = default)
     {
-        return await RunGitAsync("pull --rebase", ct);
+        return await _runner.RunAsync("git", "pull --rebase", _repoPath, ct);
     }
 
-    /// <summary>
-    /// Stash を実行
-    /// </summary>
-    public async Task<ProcessResult> StashAsync(CancellationToken ct = default)
+    public async Task<ProcessResult> StashAsync(string message, CancellationToken ct = default)
     {
-        return await RunGitAsync("stash push -m \"auto-stash before pull\"", ct);
+        return await _runner.RunAsync("git", $"stash push -m \"{EscapeArg(message)}\"", _repoPath, ct);
     }
 
-    /// <summary>
-    /// Rebase を continue
-    /// </summary>
     public async Task<ProcessResult> RebaseContinueAsync(CancellationToken ct = default)
     {
-        return await RunGitAsync("rebase --continue", ct);
+        // Must set environment variable to open editor? No, usually continue doesn't need editor if conflicts resolved.
+        // But if it asks for commit message edit, it might hang.
+        // Using GIT_EDITOR=true (shell no-op) or similar might be safer if we want to avoid interactive mode.
+        // For now, simple run.
+        return await _runner.RunAsync("git", "rebase --continue", _repoPath, ct);
     }
 
-    /// <summary>
-    /// Rebase を abort
-    /// </summary>
     public async Task<ProcessResult> RebaseAbortAsync(CancellationToken ct = default)
     {
-        return await RunGitAsync("rebase --abort", ct);
+        return await _runner.RunAsync("git", "rebase --abort", _repoPath, ct);
     }
 
-    /// <summary>
-    /// ファイルの Diff を取得
-    /// </summary>
-    public async Task<string> GetDiffAsync(string filePath, bool staged = false, CancellationToken ct = default)
+    public async Task<bool> HasUnpushedCommitsAsync(string branch, string upstream, CancellationToken ct = default)
     {
-        var args = staged ? $"diff --cached \"{filePath}\"" : $"diff \"{filePath}\"";
-        var result = await RunGitAsync(args, ct);
-        return result.Success ? result.StandardOutput : string.Empty;
+        if (string.IsNullOrEmpty(upstream)) return true; // Assuming unpushed if no upstream
+        
+        // git log origin/main..main --oneline
+        // If output is not empty, there are unpushed commits.
+        var result = await _runner.RunAsync("git", $"log {upstream}..{branch} --oneline", _repoPath, ct);
+        return result.Success && !string.IsNullOrWhiteSpace(result.StandardOutput);
     }
 
-    private async Task<ProcessResult> RunGitAsync(string arguments, CancellationToken ct)
+    public async Task<ProcessResult> GetDiffAsync(string filePath, bool cached, CancellationToken ct = default)
     {
-        return await _runner.RunAsync("git", arguments, _repoPath, ct);
+        var args = $"diff {(cached ? "--cached" : "")} -- \"{filePath}\"" ;
+        return await _runner.RunAsync("git", args, _repoPath, ct);
     }
 
-    private static string EscapeMessage(string message)
+    private static string EscapeArg(string arg)
     {
-        return message.Replace("\"", "\\\"");
+        // Basic escaping for Windows command line
+        return arg.Replace("\"", "\\\"");
     }
 }

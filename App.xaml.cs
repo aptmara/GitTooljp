@@ -4,9 +4,8 @@ using System.Windows;
 
 namespace SimplePRClient;
 
-/// <summary>
-/// Interaction logic for App.xaml
-/// </summary>
+/// @brief App.xaml の相互作用ロジック
+/// 作成者: 山内陽
 public partial class App : Application
 {
 }

@@ -4,9 +4,179 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:SimplePRClient"
+        xmlns:vm="clr-namespace:SimplePRClient.ViewModels"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
-    <Grid>
+        Title="Simple PR Client" Height="700" Width="1000"
+        WindowStartupLocation="CenterScreen">
+    
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <local:BoolToColorConverter x:Key="BoolToColorConverter"/>
+    </Window.Resources>
 
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/> <!-- Header -->
+            <RowDefinition Height="*"/>    <!-- Main Content -->
+            <RowDefinition Height="Auto"/> <!-- Footer/Log -->
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="#F0F0F0" Padding="10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Repo: " FontWeight="Bold"/>
+                    <TextBlock Text="{Binding RepositoryPath}" Margin="0,0,15,0"/>
+                    <TextBlock Text="Branch: " FontWeight="Bold"/>
+                    <TextBlock Text="{Binding CurrentBranch}" Margin="0,0,15,0"/>
+                    <TextBlock Text="{Binding StatusMessage}" Foreground="#007ACC" FontWeight="SemiBold"/>
+                </StackPanel>
+                <Button Grid.Column="1" Content="再読み込み" Command="{Binding RefreshCommand}" Padding="10,2"/>
+            </Grid>
+        </Border>
+
+        <!-- Main Content (3 cols) -->
+        <Grid Grid.Row="1" Margin="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.5*"/> <!-- Changes -->
+                <ColumnDefinition Width="3*"/>   <!-- Diff -->
+                <ColumnDefinition Width="1.5*"/> <!-- Actions -->
+            </Grid.ColumnDefinitions>
+
+            <!-- 1. Changes Panel -->
+            <DockPanel Grid.Column="0">
+                <TextBlock Text="Changes" FontWeight="Bold" DockPanel.Dock="Top" Margin="0,0,0,5"/>
+                <ListView ItemsSource="{Binding Changes}" SelectedItem="{Binding SelectedChange}">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="St" Width="30">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsStaged, Mode=OneWay}" 
+                                                  Command="{Binding DataContext.ToggleStageCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                  CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="S" Width="30" DisplayMemberBinding="{Binding IndexStatus}"/>
+                            <GridViewColumn Header="W" Width="30" DisplayMemberBinding="{Binding WorkTreeStatus}"/>
+                            <GridViewColumn Header="Path" Width="180" DisplayMemberBinding="{Binding FilePath}"/>
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+                <Grid DockPanel.Dock="Bottom" Margin="0,5,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="5"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" Content="全選択 (Check All)" Command="{Binding StageAllCommand}"/>
+                    <Button Grid.Column="2" Content="全解除 (Uncheck All)" Command="{Binding UnstageAllCommand}"/>
+                </Grid>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="0" Width="5"/>
+
+            <!-- 2. Diff Panel -->
+            <DockPanel Grid.Column="1" Margin="5,0">
+                <TextBlock Text="Diff" FontWeight="Bold" DockPanel.Dock="Top" Margin="0,0,0,5"/>
+                <TextBox Text="{Binding DiffText, Mode=OneWay}" IsReadOnly="True" 
+                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                         FontFamily="Consolas"/>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" Width="5"/>
+
+            <!-- 3. Action Panel -->
+            <ScrollViewer Grid.Column="2">
+                <StackPanel Margin="5,0,0,0">
+                    <TextBlock Text="Actions" FontWeight="Bold" Margin="0,0,0,10"/>
+
+                    <!-- Normal Mode Actions -->
+                    <StackPanel> 
+                         <!-- Logic needed for inverse. Removed conflicting Visibility binding. -->
+                         <!-- Using a style trigger usually, or converter. For simplicity, binding IsEnabled mostly. 
+                              But RebaseMode should HIDE these ideally. 
+                              Let's just use IsEnabled for MVP or simple Visibility. -->
+                         <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsRebaseMode}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+
+                        <GroupBox Header="Commit" Margin="0,0,0,10">
+                            <StackPanel Margin="5">
+                                <TextBox Text="{Binding CommitMessage, UpdateSourceTrigger=PropertyChanged}" 
+                                         Height="60" AcceptsReturn="True" TextWrapping="Wrap"
+                                         d:Text="Initial Commit"/>
+                                <Button Content="Commit" Command="{Binding CommitCommand}" Margin="0,5,0,0" Height="30"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <Button Content="Push" Command="{Binding PushCommand}" Margin="0,0,0,10" Height="40"/>
+                        <Button Content="Pull (Rebase)" Command="{Binding PullCommand}" Margin="0,0,0,10" Height="40"/>
+                        <Button Content="Create PR" Command="{Binding CreatePRCommand}" Margin="0,20,0,0" Height="50" Background="#2EA44F" Foreground="White" FontWeight="Bold"/>
+                    </StackPanel>
+
+                    <!-- Rebase Mode Actions -->
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsRebaseMode}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        
+                        <Border Background="#FFF8C4" BorderBrush="#E9D568" BorderThickness="1" Padding="10" Margin="0,0,0,20">
+                            <TextBlock Text="⚠️ Rebase (Conflict) 復旧モード" FontWeight="Bold" Foreground="#9C6500"/>
+                        </Border>
+
+                        <Button Content="Visual Studio で開く" Command="{Binding OpenVSCommand}" Margin="0,0,0,10" Height="40"/>
+                        <Button Content="Rebase Continue" Command="{Binding ContinueRebaseCommand}" Margin="0,0,0,10" Height="40"/>
+                        <Button Content="Rebase Abort" Command="{Binding AbortRebaseCommand}" Margin="0,20,0,0" Height="40" Background="#CB2431" Foreground="White"/>
+                    </StackPanel>
+                    
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Footer / Log -->
+        <Expander Grid.Row="2" IsExpanded="False" MaxHeight="200">
+            <Expander.Header>
+                 <StackPanel Orientation="Horizontal">
+                     <TextBlock Text="Log / Console" Margin="0,0,10,0"/>
+                     <TextBlock Background="Transparent">
+                        <Hyperlink Command="{Binding CopyLogCommand}">
+                            <Run Text="[Copy Log]"/>
+                        </Hyperlink>
+                     </TextBlock>
+                 </StackPanel>
+            </Expander.Header>
+            <ListBox ItemsSource="{Binding Logs}" Height="150" SelectionMode="Extended" FontFamily="Consolas">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" 
+                                   Foreground="{Binding IsError, Converter={StaticResource BoolToColorConverter}}" 
+                                   TextWrapping="Wrap"/>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Expander>
+        
+        <!-- Busy Overlay -->
+        <Grid Grid.RowSpan="3" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" Background="#80FFFFFF">
+            <ProgressBar IsIndeterminate="True" Width="200" Height="20" VerticalAlignment="Center"/>
+        </Grid>
     </Grid>
 </Window>
