@@ -21,4 +21,5 @@ A simple Git client tool built with WPF and .NET.
 
 ## License
 
+
 [MIT License](LICENSE) (Details to be added)
