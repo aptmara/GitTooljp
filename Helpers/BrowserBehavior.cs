@@ -1,46 +1,39 @@
+namespace SimplePRClient.Helpers;
+
 using System.Windows;
 using System.Windows.Controls;
 
-namespace SimplePRClient.Helpers
+public static class BrowserBehavior
 {
-    public static class BrowserBehavior
+    public static readonly DependencyProperty HtmlProperty = DependencyProperty.RegisterAttached(
+        "Html",
+        typeof(string),
+        typeof(BrowserBehavior),
+        new FrameworkPropertyMetadata(OnHtmlChanged));
+
+    [AttachedPropertyBrowsableForType(typeof(WebBrowser))]
+    public static string GetHtml(WebBrowser d)
     {
-        public static readonly DependencyProperty HtmlProperty = DependencyProperty.RegisterAttached(
-            "Html",
-            typeof(string),
-            typeof(BrowserBehavior),
-            new FrameworkPropertyMetadata(OnHtmlChanged));
+        return (string)d.GetValue(HtmlProperty);
+    }
 
-        [AttachedPropertyBrowsableForType(typeof(WebBrowser))]
-        public static string GetHtml(DependencyObject d)
-        {
-            return (string)d.GetValue(HtmlProperty);
-        }
+    public static void SetHtml(WebBrowser d, string value)
+    {
+        d.SetValue(HtmlProperty, value);
+    }
 
-        public static void SetHtml(DependencyObject d, string value)
+    private static void OnHtmlChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is WebBrowser wb)
         {
-            d.SetValue(HtmlProperty, value);
-        }
-
-        static void OnHtmlChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-        {
-            if (d is WebBrowser wb)
+            var html = e.NewValue as string ?? "";
+            if (string.IsNullOrEmpty(html))
             {
-                 if (e.NewValue is string html)
-                 {
-                     try
-                     {
-                         wb.NavigateToString(html);
-                     }
-                     catch
-                     {
-                         // Ignore
-                     }
-                 }
-                 else
-                 {
-                     wb.NavigateToString("<html></html>");
-                 }
+                wb.NavigateToString("<html><body></body></html>");
+            }
+            else
+            {
+                wb.NavigateToString(html);
             }
         }
     }

@@ -26,6 +26,8 @@ public class GitService
     }
 
     public string CurrentRepositoryPath => _repoPath;
+    
+    public string GetInternalRepoPath() => _repoPath;
 
     /// @brief 現在のディレクトリから上位に .git を探す
     /// @param startPath 探索開始ディレクトリのパス
@@ -195,9 +197,8 @@ public class GitService
         return await _runner.RunAsync("git", args, _repoPath, ct);
     }
 
-    private static string EscapeArg(string arg)
+    private string EscapeArg(string arg)
     {
-        // Basic escaping for Windows command line
         return arg.Replace("\"", "\\\"");
     }
 
@@ -233,10 +234,33 @@ public class GitService
         return res.Success ? res.StandardOutput.Trim() : string.Empty;
     }
 
-    /// @brief 指定したリモートのURLを取得する
-    public async Task<string> GetRemoteUrlAsync(string remote = "origin", CancellationToken ct = default)
+    /// @brief ブランチを削除する
+    /// @param branchName 削除するブランチ名
+    /// @param force 強制削除するかどうか (-D)
+    public async Task<ProcessResult> DeleteBranchAsync(string branchName, bool force = false, CancellationToken ct = default)
     {
-        var res = await _runner.RunAsync("git", $"remote get-url {remote}", _repoPath, ct);
-        return res.Success ? res.StandardOutput.Trim() : string.Empty;
+        var flag = force ? "-D" : "-d";
+        return await _runner.RunAsync("git", $"branch {flag} \"{EscapeArg(branchName)}\"", _repoPath, ct);
+    }
+
+    /// @brief リポジトリをCloneする
+    public async Task<ProcessResult> CloneAsync(string url, string destinationPath, CancellationToken ct = default)
+    {
+        var workingDir = Path.GetDirectoryName(destinationPath);
+        // git clone handles absolute path, working dir doesn't matter much if we provide full path
+        // but ProcessRunner might need a valid dir.
+        if (string.IsNullOrEmpty(workingDir) || !Directory.Exists(workingDir))
+        {
+             workingDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile); 
+        }
+
+        return await _runner.RunAsync("git", $"clone \"{url}\" \"{destinationPath}\"", workingDir, ct);
+    }
+
+    /// @brief リポジトリを初期化する
+    public async Task<ProcessResult> InitAsync(string path, CancellationToken ct = default)
+    {
+        if (!Directory.Exists(path)) Directory.CreateDirectory(path);
+        return await _runner.RunAsync("git", "init", path, ct);
     }
 }
