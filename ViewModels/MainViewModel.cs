@@ -715,6 +715,11 @@ public partial class MainViewModel : ObservableObject
             else
             {
                 Log("Push 失敗:\n" + result.StandardError, true);
+                
+                if (result.StandardError.Contains("rejected") || result.StandardError.Contains("failed to push"))
+                {
+                    MessageBox.Show("Push が拒否されました。\nリモートに新たな変更が含まれています。\n先に Pull (Rebase) を行ってください。", "Push エラー", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
             }
         }
         catch (Exception ex)
