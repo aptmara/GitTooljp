@@ -26,10 +26,10 @@
 
 ```mermaid
 graph LR
-    A[作業 (Work)] -->|Save| B[変更確認 (Check)]
-    B -->|Commit| C[コミット (Commit)]
-    C -->|Push| D[プッシュ (Push)]
-    D -->|Create PR| E[Pull Request作成]
+    A["作業 (Work)"] -->|Save| B["変更確認 (Check)"]
+    B -->|Commit| C["コミット (Commit)"]
+    C -->|Push| D["プッシュ (Push)"]
+    D -->|Create PR| E["Pull Request作成"]
     style A fill:#f9f,stroke:#333,stroke-width:2px
     style E fill:#bbf,stroke:#333,stroke-width:2px
 ```

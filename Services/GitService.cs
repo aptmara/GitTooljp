@@ -278,4 +278,43 @@ public class GitService
         var res = await _runner.RunAsync("git", $"remote get-url {remote}", _repoPath, ct);
         return res.Success ? res.StandardOutput.Trim() : string.Empty;
     }
+
+    /// @brief リモートURLからリポジトリオーナー名を抽出する
+    /// @param remoteUrl リモートURL（SSH/HTTPS形式）
+    /// @return オーナー名（抽出できない場合は空文字）
+    public static string ExtractOwnerFromRemoteUrl(string remoteUrl)
+    {
+        if (string.IsNullOrEmpty(remoteUrl)) return string.Empty;
+
+        // SSH形式: git@github.com:owner/repo.git
+        if (remoteUrl.StartsWith("git@"))
+        {
+            var colonIdx = remoteUrl.IndexOf(':');
+            if (colonIdx > 0 && colonIdx < remoteUrl.Length - 1)
+            {
+                var pathPart = remoteUrl.Substring(colonIdx + 1);
+                var slashIdx = pathPart.IndexOf('/');
+                if (slashIdx > 0)
+                {
+                    return pathPart.Substring(0, slashIdx);
+                }
+            }
+        }
+        // HTTPS形式: https://github.com/owner/repo.git
+        else if (remoteUrl.StartsWith("https://") || remoteUrl.StartsWith("http://"))
+        {
+            try
+            {
+                var uri = new Uri(remoteUrl);
+                var segments = uri.AbsolutePath.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+                if (segments.Length >= 1)
+                {
+                    return segments[0];
+                }
+            }
+            catch { }
+        }
+
+        return string.Empty;
+    }
 }
