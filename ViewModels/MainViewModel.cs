@@ -314,6 +314,8 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void CloseRepository()
     {
+        _gitService.SetRepository("");
+        _gitHubService.SetRepository("");
         IsRepositoryValid = false;
         RepositoryPath = "";
         CurrentBranch = "";
@@ -360,6 +362,7 @@ public partial class MainViewModel : ObservableObject
             }
 
             _gitService.SetRepository(root);
+            _gitHubService.SetRepository(root);
             IsRepositoryValid = true;
             
             // Save settings
@@ -397,6 +400,7 @@ public partial class MainViewModel : ObservableObject
              if (result.Success)
              {
                  _gitService.SetRepository(path);
+                 _gitHubService.SetRepository(path);
                  IsRepositoryValid = true;
                  _settingsService.AddRecentRepository(path);
                  LoadRecentRepositories();
@@ -470,13 +474,32 @@ public partial class MainViewModel : ObservableObject
     // Branch Creation Logic
     private void CreateNewBranchFlow()
     {
-        var inputWindow = new InputWindow("新しいブランチ名:", "ブランチ作成");
-        inputWindow.Owner = Application.Current.MainWindow;
-        if (inputWindow.ShowDialog() == true)
+        while (true)
         {
+            var inputWindow = new InputWindow("新しいブランチ名:", "ブランチ作成");
+            inputWindow.Owner = Application.Current.MainWindow;
+            if (inputWindow.ShowDialog() != true) return;
+
             var newBranch = inputWindow.InputText;
             if (string.IsNullOrWhiteSpace(newBranch)) return;
+
+            // Simple validation for common invalid chars in git branch names
+            // prohibiting: space, :, ~, ^, ?, *, [, \, ..
+            if (newBranch.Any(c => char.IsWhiteSpace(c) || ":~^?*[\"<>|\\".Contains(c)) || newBranch.Contains("..") || newBranch.Contains("@{"))
+            {
+                MessageBox.Show("ブランチ名に使用できない文字が含まれています。\n(スペース, :, ~, ^, ?, *, [, \\, \" など)\n\n有効な名前を入力してください。", "入力エラー", MessageBoxButton.OK, MessageBoxImage.Warning);
+                continue;
+            }
+
+            // Check for duplicates
+            if (Branches.Contains(newBranch))
+            {
+                MessageBox.Show($"ブランチ '{newBranch}' は既に存在します。\n別の名前を指定してください。", "重複エラー", MessageBoxButton.OK, MessageBoxImage.Warning);
+                continue;
+            }
+
             Task.Run(async () => await CreateBranchAsync(newBranch));
+            break;
         }
     }
 
@@ -859,11 +882,24 @@ public partial class MainViewModel : ObservableObject
             try
             {
                 Log($"ステージング実行 ({paths.Count} files)...", false);
+                var errors = new System.Text.StringBuilder();
                 foreach(var path in paths)
                 {
-                     await _gitService.StageFileAsync(path);
+                     var res = await _gitService.StageFileAsync(path);
+                     if (!res.Success)
+                     {
+                         errors.AppendLine($"{path}: {res.StandardError}");
+                     }
                 }
-                Log("ステージング完了", false);
+                
+                if (errors.Length > 0)
+                {
+                    Log($"ステージング一部失敗:\n{errors}", true);
+                }
+                else
+                {
+                    Log("ステージング完了", false);
+                }
             }
             finally
             {
@@ -1208,7 +1244,7 @@ public partial class MainViewModel : ObservableObject
     private void CopyLog()
     {
         var allText = string.Join(Environment.NewLine, Logs.Select(x => x.ToString()));
-        Clipboard.SetText(allText);
+        SimplePRClient.Services.ClipboardHelper.SetText(allText);
         MessageBox.Show("ログをクリップボードにコピーしました。", "完了");
     }
 
