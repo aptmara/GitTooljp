@@ -10,6 +10,10 @@ namespace SimplePRClient.Services;
 public class AppSettings
 {
     public List<string> RecentRepositories { get; set; } = new();
+    
+    /// @brief 保護ブランチへのPush警告をスキップするリポジトリ+ブランチのリスト
+    /// 形式: "リポジトリパス|ブランチ名" (例: "C:\repo|main")
+    public List<string> SkipProtectedBranchWarning { get; set; } = new();
 }
 
 public class SettingsService

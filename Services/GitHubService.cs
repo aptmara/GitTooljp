@@ -74,6 +74,15 @@ public class GitHubService
         return result.Success ? result.StandardOutput.Trim() : "main";
     }
 
+    /// @brief 現在のGitHub認証ユーザー名を取得
+    /// @param ct キャンセルトークン
+    /// @return ユーザー名（取得できない場合は空文字）
+    public async Task<string> GetCurrentUserAsync(CancellationToken ct = default)
+    {
+        var result = await RunGhAsync("api user --jq .login", ct);
+        return result.Success ? result.StandardOutput.Trim() : string.Empty;
+    }
+
     private static string EscapeArg(string arg)
     {
         return arg.Replace("\"", "\\\"");
