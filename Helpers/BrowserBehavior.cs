@@ -29,12 +29,10 @@ public static class BrowserBehavior
             var html = e.NewValue as string ?? "";
             if (string.IsNullOrEmpty(html))
             {
-                wb.NavigateToString("<html><body></body></html>");
+                html = "<html><head><meta charset='utf-8'></head><body></body></html>";
             }
-            else
-            {
-                wb.NavigateToString(html);
-            }
+            
+            wb.NavigateToString(html);
         }
     }
 }

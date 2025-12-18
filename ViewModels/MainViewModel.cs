@@ -192,7 +192,10 @@ public partial class MainViewModel : ObservableObject
         if (string.IsNullOrEmpty(diffText)) return "<html><body></body></html>";
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("<!DOCTYPE html><html><head><meta charset='utf-8'><style>");
+        sb.AppendLine("<!DOCTYPE html><html><head>");
+        sb.AppendLine("<meta http-equiv='Content-Type' content='text/html; charset=utf-8'>");
+        sb.AppendLine("<meta charset='utf-8'>");
+        sb.AppendLine("<style>");
         sb.AppendLine("body { font-family: Consolas, 'Courier New', monospace; font-size: 13px; margin: 0; padding: 5px; white-space: pre-wrap; word-wrap: break-word; }");
         sb.AppendLine(".add { background-color: #e6ffec; color: #24292e; display: block; border-left: 4px solid #2ea44f; padding-left: 5px; }");
         sb.AppendLine(".del { background-color: #ffebe9; color: #24292e; display: block; border-left: 4px solid #cb2431; padding-left: 5px; }");
@@ -629,7 +632,7 @@ public partial class MainViewModel : ObservableObject
 
             if (System.IO.File.Exists(readmePath))
             {
-                var content = await System.IO.File.ReadAllTextAsync(readmePath);
+                var content = await System.IO.File.ReadAllTextAsync(readmePath, System.Text.Encoding.UTF8);
                 ReadmeHtml = ConvertMarkdownToHtml(content);
             }
             else
@@ -645,9 +648,11 @@ public partial class MainViewModel : ObservableObject
 
     private string ConvertMarkdownToHtml(string md)
     {
-        var html = System.Net.WebUtility.HtmlEncode(md);
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("<html><body style='font-family: sans-serif; padding: 10px;'>");
+        sb.AppendLine("<!DOCTYPE html><html><head>");
+        sb.AppendLine("<meta http-equiv='Content-Type' content='text/html; charset=utf-8'>");
+        sb.AppendLine("<meta charset='utf-8'>");
+        sb.AppendLine("</head><body style='font-family: sans-serif; padding: 10px;'>");
         
         var lines = md.Split('\n');
         bool inCodeBlock = false;

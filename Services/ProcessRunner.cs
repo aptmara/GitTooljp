@@ -53,8 +53,16 @@ public class ProcessRunner
             StandardErrorEncoding = interactive ? null : Encoding.UTF8
         };
 
-        // 環境変数の調整
-        if (!interactive) psi.EnvironmentVariables["LANG"] = "en_US.UTF-8"; // 英語出力を強制する場合
+        // 環境変数の調整 - Gitの出力をUTF-8に強制
+        if (!interactive) 
+        {
+            psi.EnvironmentVariables["LANG"] = "C.UTF-8";
+            psi.EnvironmentVariables["LC_ALL"] = "C.UTF-8";
+            psi.EnvironmentVariables["GIT_PAGER"] = ""; // ページャを無効化
+            psi.EnvironmentVariables["LESSCHARSET"] = "utf-8";
+            // Windows Git が内部的に使用するエンコーディング設定
+            psi.EnvironmentVariables["GIT_OUTPUT_ENCODING"] = "utf-8";
+        }
         configureEnvironment?.Invoke(psi.EnvironmentVariables);
 
         using var process = new Process { StartInfo = psi };
