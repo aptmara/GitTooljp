@@ -79,4 +79,38 @@ public class SettingsService
 
         Save();
     }
+
+    /// @brief 指定のリポジトリ+ブランチで保護ブランチ警告をスキップするかどうかを確認
+    /// @param repoPath リポジトリパス
+    /// @param branch ブランチ名
+    /// @return スキップ設定がある場合true
+    public bool ShouldSkipProtectedBranchWarning(string repoPath, string branch)
+    {
+        if (string.IsNullOrEmpty(repoPath) || string.IsNullOrEmpty(branch)) return false;
+        var key = CreateProtectedBranchKey(repoPath, branch);
+        return Settings.SkipProtectedBranchWarning.Any(k => 
+            string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// @brief 指定のリポジトリ+ブランチで保護ブランチ警告をスキップする設定を追加
+    /// @param repoPath リポジトリパス
+    /// @param branch ブランチ名
+    public void AddSkipProtectedBranchWarning(string repoPath, string branch)
+    {
+        if (string.IsNullOrEmpty(repoPath) || string.IsNullOrEmpty(branch)) return;
+        var key = CreateProtectedBranchKey(repoPath, branch);
+        
+        if (!Settings.SkipProtectedBranchWarning.Any(k => 
+            string.Equals(k, key, StringComparison.OrdinalIgnoreCase)))
+        {
+            Settings.SkipProtectedBranchWarning.Add(key);
+            Save();
+        }
+    }
+
+    private static string CreateProtectedBranchKey(string repoPath, string branch)
+    {
+        var normalized = Path.GetFullPath(repoPath);
+        return $"{normalized}|{branch}";
+    }
 }
