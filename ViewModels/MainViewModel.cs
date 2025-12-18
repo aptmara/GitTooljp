@@ -932,6 +932,39 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanPush))]
     private async Task PushAsync()
     {
+        // 保護ブランチへのPush警告チェック
+        var protectedBranches = new[] { "main", "master" };
+        if (protectedBranches.Contains(CurrentBranch, StringComparer.OrdinalIgnoreCase))
+        {
+            // スキップ設定を確認
+            if (!_settingsService.ShouldSkipProtectedBranchWarning(RepositoryPath, CurrentBranch))
+            {
+                // 他人のリポジトリかどうかを確認
+                var currentUser = await _gitHubService.GetCurrentUserAsync();
+                var repoOwner = GitService.ExtractOwnerFromRemoteUrl(RemoteUrl);
+                
+                // オーナーとユーザーが異なる場合（他人のリポジトリ）
+                if (!string.IsNullOrEmpty(currentUser) && !string.IsNullOrEmpty(repoOwner) &&
+                    !string.Equals(currentUser, repoOwner, StringComparison.OrdinalIgnoreCase))
+                {
+                    // 警告ダイアログを表示
+                    var warningResult = ShowProtectedBranchWarning(repoOwner, CurrentBranch);
+                    
+                    if (warningResult == MessageBoxResult.Cancel)
+                    {
+                        Log($"Push がキャンセルされました（{repoOwner}/{CurrentBranch} への直接Push）", false);
+                        return;
+                    }
+                    
+                    // 「今後警告しない」がチェックされていた場合
+                    if (warningResult == MessageBoxResult.Yes)
+                    {
+                        _settingsService.AddSkipProtectedBranchWarning(RepositoryPath, CurrentBranch);
+                    }
+                }
+            }
+        }
+
         IsBusy = true;
         try
         {
@@ -964,6 +997,26 @@ public partial class MainViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    /// @brief 保護ブランチへのPush警告ダイアログを表示
+    /// @param repoOwner リポジトリオーナー名
+    /// @param branchName ブランチ名
+    /// @return Yes=続行（今後警告しない）, No=続行（次回も警告）, Cancel=キャンセル
+    private MessageBoxResult ShowProtectedBranchWarning(string repoOwner, string branchName)
+    {
+        var message = $"⚠️ 警告: 他人のリポジトリ ({repoOwner}) の保護ブランチ '{branchName}' に直接Pushしようとしています。\n\n" +
+                      $"通常、他人のリポジトリでは別ブランチを作成し、Pull Requestを通じてマージするのが安全な方法です。\n\n" +
+                      $"本当にこのまま Push を続行しますか？\n\n" +
+                      $"[はい] = 続行して、このブランチでは今後警告しない\n" +
+                      $"[いいえ] = 続行する（次回も警告する）\n" +
+                      $"[キャンセル] = Pushを中止";
+        
+        return MessageBox.Show(
+            message,
+            "保護ブランチへのPush警告",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Warning);
     }
 
     private bool CanPush() => IsNotBusy && !IsRebaseMode && (CurrentState.HasFlag(RepoState.Unpushed) || CurrentState.HasFlag(RepoState.NoUpstream));
