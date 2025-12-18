@@ -63,7 +63,7 @@ public partial class MainWindow : Window
             var text = item.Content?.ToString();
             if (!string.IsNullOrEmpty(text))
             {
-                Clipboard.SetText(text);
+                ClipboardHelper.SetText(text);
             }
         }
     }
@@ -81,7 +81,7 @@ public partial class MainWindow : Window
                 {
                     sb.AppendLine(item.ToString());
                 }
-                Clipboard.SetText(sb.ToString().TrimEnd());
+                ClipboardHelper.SetText(sb.ToString().TrimEnd());
                 // Mark handled to prevent default beep if any
                 e.Handled = true;
             }

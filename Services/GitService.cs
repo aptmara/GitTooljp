@@ -51,7 +51,8 @@ public class GitService
     /// @return 変更リスト、ブランチ名、Upstream名、Dirtyフラグのタプル
     public async Task<(List<FileChangeEntry> Changes, string Branch, string Upstream, bool IsDirty)> GetStatusAsync(CancellationToken ct = default)
     {
-        var result = await _runner.RunAsync("git", "status --porcelain=v1 -b", _repoPath, ct);
+        // Force unquoted paths for non-ASCII characters
+        var result = await _runner.RunAsync("git", "-c core.quotePath=false status --porcelain=v1 -b", _repoPath, ct);
         
         var changes = new List<FileChangeEntry>();
         string branch = "HEAD";
@@ -92,12 +93,7 @@ public class GitService
             // Remove quotes if present
             path = path.Trim('"');
 
-            changes.Add(new FileChangeEntry
-            {
-                FilePath = path,
-                IndexStatus = indexStatus,
-                WorkTreeStatus = workTreeStatus
-            });
+            changes.Add(new FileChangeEntry(path, indexStatus, workTreeStatus));
 
             if (indexStatus != '?' && indexStatus != ' ') isDirty = true; // Staged changes
             if (workTreeStatus != '?' && workTreeStatus != ' ') isDirty = true; // Unstaged changes (tracked files)
@@ -136,15 +132,27 @@ public class GitService
 
     public async Task<ProcessResult> CommitAsync(string message, string body, CancellationToken ct = default)
     {
-        // git commit -m "title" -m "body"
-        // Argument escaping is critical here. Using a simpler approach for now.
-        // For production, consider using a temporary file for the message if it contains complex chars.
-        
-        // Simple escaping for CLI (basic quotes handling)
-        var msgArg = EscapeArg(message);
-        var bodyArg = string.IsNullOrEmpty(body) ? "" : $"-m \"{EscapeArg(body)}\"" ;
-
-        return await _runner.RunAsync("git", $"commit -m \"{msgArg}\" {bodyArg}", _repoPath, ct);
+        // Use a temporary file to avoid command line escaping issues
+        var tmpFile = Path.GetTempFileName();
+        try
+        {
+             var fullMessage = message;
+             if (!string.IsNullOrEmpty(body))
+             {
+                 fullMessage += "\n\n" + body;
+             }
+             
+             await File.WriteAllTextAsync(tmpFile, fullMessage, ct);
+             
+             return await _runner.RunAsync("git", $"commit -F \"{tmpFile}\"", _repoPath, ct);
+        }
+        finally
+        {
+             if (File.Exists(tmpFile))
+             {
+                 try { File.Delete(tmpFile); } catch { }
+             }
+        }
     }
 
     public async Task<ProcessResult> PushAsync(string branch, bool setUpstream = false, CancellationToken ct = default)
